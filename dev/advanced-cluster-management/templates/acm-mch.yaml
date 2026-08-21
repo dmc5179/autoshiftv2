@@ -1,0 +1,17 @@
+apiVersion: operator.open-cluster-management.io/v1
+kind: MultiClusterHub
+metadata:
+  name: multiclusterhub
+  namespace: {{ .Values.acm.namespace }}
+  annotations:
+    # post-install only. Helm's default hook-delete-policy is before-hook-creation, so a
+    # post-upgrade hook would delete and recreate the MultiClusterHub on every upgrade,
+    # taking ACM down with it. After bootstrap the MultiClusterHub is owned by
+    # policy-acm-mch-install, which reconciles any spec change.
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "25"
+spec:
+  availabilityConfig: {{ .Values.acm.availabilityConfig }}
+{{ if .Values.acm.disable_hub_self_management }}
+  disableHubSelfManagement: {{ .Values.acm.disable_hub_self_management }}
+{{ end}}
