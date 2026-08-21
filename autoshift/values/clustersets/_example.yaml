@@ -1104,6 +1104,45 @@ hubClusterSets:
       node-feature-discovery-version: 'nfd.4.22.0-202608122145'
 
       # =======================================================================
+      # Confidential Containers (CoCo) — Intel TDX / AMD SEV-SNP
+      # Requires OCP 4.21.9+, FIPS-enabled, bare-metal with TEE hardware.
+      # Enable sandboxed-containers + trustee together for a complete CoCo stack.
+      # =======================================================================
+
+      # --- OpenShift Sandboxed Containers (CoCo runtime) ---
+      sandboxed-containers: 'false'
+      sandboxed-containers-subscription-name: sandboxed-containers-operator
+      sandboxed-containers-channel: stable
+      sandboxed-containers-source: redhat-operators
+      sandboxed-containers-source-namespace: openshift-marketplace
+      # sandboxed-containers-version: 'sandboxed-containers-operator.vX.Y.Z'
+      sandboxed-containers-confidential: 'true'    # Enable confidential containers feature gate
+
+      # --- Trustee / Key Broker Service (attestation + secret delivery) ---
+      trustee: 'false'
+      trustee-subscription-name: trustee-operator
+      trustee-channel: stable
+      trustee-source: redhat-operators
+      trustee-source-namespace: openshift-marketplace
+      # trustee-version: 'trustee-operator.vX.Y.Z'
+
+      # --- Intel Device Plugins Operator (SGX plugin for attestation) ---
+      intel-device-plugins: 'false'
+      intel-device-plugins-subscription-name: intel-device-plugins-operator
+      intel-device-plugins-channel: stable
+      intel-device-plugins-source: certified-operators
+      intel-device-plugins-source-namespace: openshift-marketplace
+      # intel-device-plugins-version: 'intel-device-plugins-operator.vX.Y.Z'
+
+      # --- Intel TDX DCAP Operator (QGS lifecycle) ---
+      intel-tdx-dcap: 'false'
+      intel-tdx-dcap-subscription-name: intel-tdx-dcap-operator
+      intel-tdx-dcap-channel: alpha
+      intel-tdx-dcap-source: certified-operators
+      intel-tdx-dcap-source-namespace: openshift-marketplace
+      # intel-tdx-dcap-version: 'intel-tdx-dcap-operator.vX.Y.Z'
+
+      # =======================================================================
       # SR-IOV Network Operator
       # =======================================================================
       sriov: 'false'

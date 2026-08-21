@@ -1,0 +1,31 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intel-device-plugins
+placementBindingDefaults:
+  name: binding-policy-intel-device-plugins
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  remediationAction: ${REMEDIATION}
+  severity: high
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-intel-device-plugins-operator-install
+    manifests:
+      - path: manifests/operator-install
+  - name: policy-intel-device-plugins-sgx-config
+    dependencies:
+      - name: policy-intel-device-plugins-operator-install
+    manifests:
+      - path: manifests/sgx-plugin-config

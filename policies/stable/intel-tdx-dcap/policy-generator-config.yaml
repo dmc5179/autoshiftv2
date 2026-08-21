@@ -1,0 +1,31 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intel-tdx-dcap
+placementBindingDefaults:
+  name: binding-policy-intel-tdx-dcap
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  remediationAction: ${REMEDIATION}
+  severity: high
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-intel-tdx-dcap-operator-install
+    manifests:
+      - path: manifests/operator-install
+  - name: policy-intel-tdx-dcap-qgs-config
+    dependencies:
+      - name: policy-intel-tdx-dcap-operator-install
+    manifests:
+      - path: manifests/qgs-config

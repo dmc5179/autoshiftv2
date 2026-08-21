@@ -1,0 +1,147 @@
+# Baremetal SNO with Confidential Containers (CoCo) - Intel TDX
+# Extends hub-baremetal-sno with CoCo operators and configuration.
+# Requires FIPS-enabled OCP 4.21.9+ with Intel TDX-capable hardware.
+
+# Override: Exclude policies not applicable to SNO
+excludePolicies:
+  - infra-nodes
+  - worker-nodes
+
+hubClusterSets:
+  hub:
+    labels:
+      # OpenShift version — CoCo GA requires 4.21.9+
+      openshift-version: '4.21.15'
+      self-managed: 'true'
+
+      # =======================================================================
+      # Disconnected / Air-Gapped Mirror
+      # =======================================================================
+      disconnected-mirror: 'true'
+      mirror-catalog-suffix: 'mirror'
+
+      # =======================================================================
+      # ACM (required for policy delivery)
+      # =======================================================================
+      acm-subscription-name: advanced-cluster-management
+      acm-channel: release-2.17
+      acm-source: redhat-operators
+      acm-source-namespace: openshift-marketplace
+      acm-availability-config: 'Basic'
+      acm-observability: 'false'
+
+      # =======================================================================
+      # OpenShift GitOps (required for AutoShift delivery)
+      # =======================================================================
+      gitops: 'true'
+      gitops-subscription-name: openshift-gitops-operator
+      gitops-disable-default-argocd: 'true'
+      gitops-channel: gitops-1.21
+      gitops-source: redhat-operators
+      gitops-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Node Feature Discovery (detects TDX/SNP/SGX hardware)
+      # =======================================================================
+      node-feature-discovery: 'true'
+      node-feature-discovery-subscription-name: nfd
+      node-feature-discovery-channel: stable
+      node-feature-discovery-source: redhat-operators
+      node-feature-discovery-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # OpenShift Sandboxed Containers (CoCo runtime)
+      # =======================================================================
+      sandboxed-containers: 'true'
+      sandboxed-containers-subscription-name: sandboxed-containers-operator
+      sandboxed-containers-channel: stable
+      sandboxed-containers-source: redhat-operators
+      sandboxed-containers-source-namespace: openshift-marketplace
+      sandboxed-containers-confidential: 'true'
+
+      # =======================================================================
+      # Trustee / Key Broker Service (attestation + secret delivery)
+      # =======================================================================
+      trustee: 'true'
+      trustee-subscription-name: trustee-operator
+      trustee-channel: stable
+      trustee-source: redhat-operators
+      trustee-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Intel Device Plugins Operator (SGX plugin for attestation)
+      # =======================================================================
+      intel-device-plugins: 'true'
+      intel-device-plugins-subscription-name: intel-device-plugins-operator
+      intel-device-plugins-channel: stable
+      intel-device-plugins-source: certified-operators
+      intel-device-plugins-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Intel TDX DCAP Operator (QGS lifecycle)
+      # =======================================================================
+      intel-tdx-dcap: 'true'
+      intel-tdx-dcap-subscription-name: intel-tdx-dcap-operator
+      intel-tdx-dcap-channel: alpha
+      intel-tdx-dcap-source: certified-operators
+      intel-tdx-dcap-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Local Storage Operator (for KBS persistent storage)
+      # =======================================================================
+      local-storage: 'true'
+      local-storage-subscription-name: local-storage-operator
+      local-storage-channel: stable
+      local-storage-source: redhat-operators
+      local-storage-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # LVM Storage (default StorageClass for SNO)
+      # =======================================================================
+      lvm: 'true'
+      lvm-subscription-name: lvms-operator
+      lvm-default: 'true'
+      lvm-fstype: xfs
+      lvm-size-percent: 90
+      lvm-overprovision-ratio: 10
+      lvm-channel: stable-4.21
+      lvm-source: redhat-operators
+      lvm-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Master Nodes
+      # =======================================================================
+      master-nodes: 'true'
+      master-max-pods: 500
+
+      # =======================================================================
+      # MetalLB
+      # =======================================================================
+      metallb: 'true'
+      metallb-subscription-name: metallb-operator
+      metallb-source: redhat-operators
+      metallb-source-namespace: openshift-marketplace
+      metallb-channel: stable
+      metallb-quota: 'false'
+      metallb-ippool-1: ''
+      metallb-l2-1: ''
+      metallb-bgp-1: ''
+      metallb-peer-1: ''
+
+      # =======================================================================
+      # OpenShift Internal Registry
+      # =======================================================================
+      imageregistry: 'true'
+      imageregistry-management-state: Managed
+      imageregistry-replicas: '1'
+      imageregistry-storage-type: pvc
+      imageregistry-pvc-access-mode: ReadWriteOnce
+      imageregistry-pvc-size: 100Gi
+      imageregistry-pvc-storage-class: lvms-vg1
+      imageregistry-pvc-volume-mode: Filesystem
+      imageregistry-rollout-strategy: Recreate
+
+      # =======================================================================
+      # Developer OpenShift GitOps
+      # =======================================================================
+      gitops-dev: 'true'

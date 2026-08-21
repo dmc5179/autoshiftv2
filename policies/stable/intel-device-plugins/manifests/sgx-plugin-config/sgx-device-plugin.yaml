@@ -1,0 +1,9 @@
+apiVersion: deviceplugin.intel.com/v1
+kind: SgxDevicePlugin
+metadata:
+  name: sgx-device-plugin
+  namespace: openshift-operators
+spec:
+  image: ""
+  nodeSelector:
+    intel.feature.node.kubernetes.io/sgx: 'true'
