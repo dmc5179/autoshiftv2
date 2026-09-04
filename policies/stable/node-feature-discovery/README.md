@@ -1,11 +1,19 @@
 # node-feature-discovery AutoShift Policy
 
 ## Overview
-This policy installs the nfd operator using AutoShift patterns.
+This policy installs the NFD operator, deploys the NodeFeatureDiscovery instance,
+and applies CoCo-specific NodeFeatureRules for hardware detection.
+
+## Policies
+
+| Policy | Purpose |
+| ------ | ------- |
+| `policy-nfd-operator-install` | Installs the NFD operator via the shared `operator-install` chart |
+| `policy-nfd-instance-deploy` | Creates the NodeFeatureDiscovery CR; depends on operator-install |
+| `policy-nfd-coco-nodefeaturerule` | Applies NodeFeatureRules that detect TDX, SNP, SGX, and kata-capable hardware; depends on instance-deploy |
 
 ## Status
-✅ **Operator Installation**: Ready to deploy  
-🔧 **Configuration**: Requires operator-specific setup (see below)
+Ready to deploy (operator install + NFD instance + CoCo hardware detection rules)
 
 ## Quick Deploy
 

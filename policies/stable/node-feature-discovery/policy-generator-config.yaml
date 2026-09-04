@@ -35,3 +35,10 @@ policies:
       - name: policy-nfd-operator-install
     manifests:
       - path: manifests/node-feature-discovery-instance.yaml
+  # 3) CoCo NodeFeatureRule: detects TDX, SNP, SGX, and kata-capable hardware.
+  #    Waits on the NFD instance so the NodeFeatureRule CRD and NFD worker are available.
+  - name: policy-nfd-coco-nodefeaturerule
+    dependencies:
+      - name: policy-nfd-instance-deploy
+    manifests:
+      - path: manifests/coco-nodefeaturerule
