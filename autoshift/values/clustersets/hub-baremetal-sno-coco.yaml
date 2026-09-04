@@ -1,6 +1,6 @@
 # Baremetal SNO with Confidential Containers (CoCo) - Intel TDX
 # Extends hub-baremetal-sno with CoCo operators and configuration.
-# Requires FIPS-enabled OCP 4.21.9+ with Intel TDX-capable hardware.
+# Requires FIPS-enabled OCP 4.22+ with Intel TDX-capable hardware.
 
 # Override: Exclude policies not applicable to SNO
 excludePolicies:
@@ -11,7 +11,7 @@ hubClusterSets:
   hub:
     labels:
       # OpenShift version — CoCo GA requires 4.21.9+
-      openshift-version: '4.21.15'
+      openshift-version: '4.22.6'
       self-managed: 'true'
 
       # =======================================================================
@@ -97,6 +97,7 @@ hubClusterSets:
 
       # =======================================================================
       # LVM Storage (default StorageClass for SNO)
+      # LVMS auto-discovers available disks; expects /dev/sdb on this cluster
       # =======================================================================
       lvm: 'true'
       lvm-subscription-name: lvms-operator
@@ -104,7 +105,7 @@ hubClusterSets:
       lvm-fstype: xfs
       lvm-size-percent: 90
       lvm-overprovision-ratio: 10
-      lvm-channel: stable-4.21
+      lvm-channel: stable-4.22
       lvm-source: redhat-operators
       lvm-source-namespace: openshift-marketplace
 
