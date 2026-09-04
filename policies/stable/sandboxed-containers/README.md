@@ -8,7 +8,8 @@ Containers (CoCo) runtime via ACM governance policies.
 | Policy | Purpose |
 | ------ | ------- |
 | `policy-sandboxed-containers-operator-install` | Installs the sandboxed-containers-operator via the shared `operator-install` chart |
-| `policy-sandboxed-containers-coco-config` | Applies CoCo configuration (feature gates + KataConfig); depends on operator-install |
+| `policy-sandboxed-containers-tdx-machine-config` | Applies Intel TDX kernel args (`kvm_intel.tdx=1`, `nohibernate`) and loads `vsock-loopback` module; depends on operator-install |
+| `policy-sandboxed-containers-coco-config` | Applies CoCo configuration (feature gates + KataConfig); depends on tdx-machine-config |
 
 ## Cluster Labels
 
@@ -37,8 +38,13 @@ The `coco-config` manifests apply:
 - **osc-feature-gates** ConfigMap — enables `confidential: "true"` and `deploymentMode: DaemonSetFallback`
 - **KataConfig** CR — `enablePeerPods: false`, `checkNodeEligibility: true`
 
-NodeFeatureRules for TDX/SNP/SGX detection and MachineConfig for kernel
-arguments are managed by separate policies (NFD and infrastructure).
+NodeFeatureRules for TDX/SNP/SGX detection are managed by NFD.
+
+The `tdx-machine-config` policy applies a MachineConfig that sets Intel TDX
+kernel arguments and loads the `vsock-loopback` kernel module at boot. This
+triggers a MachineConfigPool rollout (node reboot) and must complete before
+KataConfig can use TDX. The dependency chain ensures correct ordering:
+operator-install -> tdx-machine-config -> coco-config.
 
 ## Dependencies
 
