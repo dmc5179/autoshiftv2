@@ -6,4 +6,6 @@ metadata:
 spec:
   kbsConfigMapName: kbs-config-cm
   kbsAuthSecretName: kbs-auth-public-key
+  kbsAttestationKeySecretName: kbs-attestation-key
+  kbsAttestationCertSecretName: kbs-attestation-cert
   kbsDeploymentType: AllInOneDeployment
