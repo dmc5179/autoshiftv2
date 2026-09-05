@@ -38,7 +38,7 @@ data:
 
     [[plugins]]
     name = "resource"
-    type = "LocalFs"
+    storage_backend_type = "LocalFs"
     dir_path = "/opt/confidential-containers/kbs/repository"
 
     [policy_engine]
