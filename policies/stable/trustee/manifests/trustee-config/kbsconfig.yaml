@@ -7,4 +7,3 @@ spec:
   kbsConfigMapName: kbs-config-cm
   kbsAuthSecretName: kbs-auth-public-key
   kbsDeploymentType: AllInOneDeployment
-  kbsResourcePolicy: opa
