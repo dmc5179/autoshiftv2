@@ -13,6 +13,8 @@ data:
     authorization_mode = "InsecureAllowAll"
 
     [attestation_token]
+    attestation_token_type = "CoCo"
+    trusted_certs_paths = ["/etc/attestation-cert/cert"]
     insecure_key = true
 
     [attestation_service]
