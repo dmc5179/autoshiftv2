@@ -24,13 +24,13 @@ policies:
   - name: policy-sandboxed-containers-operator-install
     manifests:
       - path: manifests/operator-install
-  - name: policy-sandboxed-containers-tdx-machine-config
+  - name: policy-sandboxed-containers-tdx-mc
     dependencies:
       - name: policy-sandboxed-containers-operator-install
     manifests:
       - path: manifests/tdx-machine-config
   - name: policy-sandboxed-containers-coco-config
     dependencies:
-      - name: policy-sandboxed-containers-tdx-machine-config
+      - name: policy-sandboxed-containers-tdx-mc
     manifests:
       - path: manifests/coco-config
