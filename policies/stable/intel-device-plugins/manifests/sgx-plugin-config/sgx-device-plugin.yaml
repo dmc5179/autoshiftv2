@@ -5,5 +5,7 @@ metadata:
   namespace: openshift-operators
 spec:
   image: ""
+  enclaveLimit: 10
+  provisionLimit: 10
   nodeSelector:
     intel.feature.node.kubernetes.io/sgx: 'true'
