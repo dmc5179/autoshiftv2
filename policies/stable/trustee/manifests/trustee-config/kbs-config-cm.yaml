@@ -10,31 +10,20 @@ data:
     insecure_http = true
 
     [admin]
-    insecure_api = true
-    auth_public_key = "/etc/auth-secret/publicKey"
+    authorization_mode = "InsecureAllowAll"
 
     [attestation_token]
     insecure_key = true
-    attestation_token_type = "CoCo"
 
     [attestation_service]
     type = "coco_as_builtin"
-    work_dir = "/opt/confidential-containers/attestation-service"
-    policy_engine = "opa"
+    timeout = 5
 
     [attestation_service.attestation_token_broker]
-    type = "Ear"
-    policy_dir = "/opt/confidential-containers/attestation-service/policies"
-
-    [attestation_service.attestation_token_config]
     duration_min = 5
 
     [attestation_service.rvps_config]
     type = "BuiltIn"
-
-    [attestation_service.rvps_config.storage]
-    type = "LocalJson"
-    file_path = "/opt/confidential-containers/rvps/reference-values/reference-values.json"
 
     [storage_backend]
     storage_type = "LocalFs"
@@ -45,6 +34,3 @@ data:
     [[plugins]]
     name = "resource"
     storage_backend_type = "kvstorage"
-
-    [policy_engine]
-    policy_path = "/opt/confidential-containers/opa/policy.rego"
