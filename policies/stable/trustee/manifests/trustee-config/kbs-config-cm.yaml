@@ -36,10 +36,15 @@ data:
     type = "LocalJson"
     file_path = "/opt/confidential-containers/rvps/reference-values/reference-values.json"
 
+    [storage_backend]
+    storage_type = "LocalFs"
+
+    [storage_backend.backends.local_fs]
+    dir_path = "/opt/confidential-containers/kbs/repository"
+
     [[plugins]]
     name = "resource"
-    storage_backend_type = "LocalFs"
-    dir_path = "/opt/confidential-containers/kbs/repository"
+    storage_backend_type = "kvstorage"
 
     [policy_engine]
     policy_path = "/opt/confidential-containers/opa/policy.rego"
