@@ -15,7 +15,6 @@ data:
     [attestation_token]
     attestation_token_type = "CoCo"
     trusted_certs_paths = ["/etc/attestation-cert/cert"]
-    insecure_key = true
 
     [attestation_service]
     type = "coco_as_builtin"
@@ -23,6 +22,10 @@ data:
 
     [attestation_service.attestation_token_broker]
     duration_min = 5
+
+    [attestation_service.attestation_token_broker.signer]
+    key_path = "/etc/attestation-key/key"
+    cert_path = "/etc/attestation-cert/cert"
 
     [attestation_service.rvps_config]
     type = "BuiltIn"
