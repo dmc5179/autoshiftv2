@@ -1,8 +1,10 @@
-apiVersion: confidentialcontainers.intel.com/v1alpha1
-kind: QgsConfig
+apiVersion: trustedservices.intel.com/v1
+kind: TdxQuoteGenerationService
 metadata:
-  name: qgs-config
+  name: intel-tdx-dcap
   namespace: intel-dcap
 spec:
   nodeSelector:
-    intel.feature.node.kubernetes.io/tdx: 'true'
+    - "intel.feature.node.kubernetes.io/tdx=true"
+  platformRegistration:
+    Offline: {}
