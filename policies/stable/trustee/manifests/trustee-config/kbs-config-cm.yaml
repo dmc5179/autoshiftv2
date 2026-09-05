@@ -29,7 +29,7 @@ data:
     storage_type = "LocalFs"
 
     [storage_backend.backends.local_fs]
-    dir_path = "/opt/confidential-containers/kbs/repository"
+    dir_path = "/opt/confidential-containers/storage"
 
     [[plugins]]
     name = "resource"
