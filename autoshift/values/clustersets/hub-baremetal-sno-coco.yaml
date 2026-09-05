@@ -17,8 +17,8 @@ hubClusterSets:
       # =======================================================================
       # Disconnected / Air-Gapped Mirror
       # =======================================================================
-      disconnected-mirror: 'true'
-      mirror-catalog-suffix: 'mirror'
+      disconnected-mirror: 'false'
+      # mirror-catalog-suffix: 'mirror'
 
       # =======================================================================
       # ACM (required for policy delivery)

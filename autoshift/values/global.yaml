@@ -8,8 +8,8 @@ autoshift:
   # When false, policies use their defined remediationAction
   dryRun: false
 
-autoshiftGitRepo: https://github.com/auto-shift/autoshiftv2.git
-autoshiftGitBranchTag: main
+autoshiftGitRepo: https://github.com/dmc5179/autoshiftv2.git
+autoshiftGitBranchTag: coco-disconnected
 
 # ArgoCD namespace — single source of truth for all policy charts
 # Per-cluster overrides use the autoshift.io/gitops-namespace label
