@@ -8,8 +8,6 @@ helmCharts:
     valuesInline:
       name: intel-tdx-dcap
       namespace: intel-dcap
-      targetNamespaces:
-        - intel-dcap
       remediation: ${REMEDIATION}
       subscription:
         name: '{{hub index .ManagedClusterLabels "autoshift.io/intel-tdx-dcap-subscription-name" | default "intel-tdx-dcap-operator" hub}}'
