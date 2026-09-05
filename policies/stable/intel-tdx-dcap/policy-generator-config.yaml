@@ -24,8 +24,13 @@ policies:
   - name: policy-intel-tdx-dcap-operator-install
     manifests:
       - path: manifests/operator-install
-  - name: policy-intel-tdx-dcap-qgs-config
+  - name: policy-intel-tdx-dcap-qgs-scc
     dependencies:
       - name: policy-intel-tdx-dcap-operator-install
+    manifests:
+      - path: manifests/qgs-scc
+  - name: policy-intel-tdx-dcap-qgs-config
+    dependencies:
+      - name: policy-intel-tdx-dcap-qgs-scc
     manifests:
       - path: manifests/qgs-config
