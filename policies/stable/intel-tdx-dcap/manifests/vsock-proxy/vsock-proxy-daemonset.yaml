@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: qgs-vsock-proxy
+  namespace: intel-dcap
+  labels:
+    app: qgs-vsock-proxy
+spec:
+  selector:
+    matchLabels:
+      app: qgs-vsock-proxy
+  template:
+    metadata:
+      labels:
+        app: qgs-vsock-proxy
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        intel.feature.node.kubernetes.io/tdx: "true"
+      serviceAccountName: intel-tdx-dcap
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: proxy
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          command:
+            - /host-usr-bin/socat
+          args:
+            - VSOCK-LISTEN:4050,reuseaddr,fork
+            - UNIX-CONNECT:/run/tdx-qgs/qgs.socket
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: qgs-socket
+              mountPath: /run/tdx-qgs
+            - name: dev-vsock
+              mountPath: /dev/vsock
+            - name: host-socat
+              mountPath: /host-usr-bin/socat
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+      volumes:
+        - name: qgs-socket
+          hostPath:
+            path: /var/run/tdx-qgs
+            type: DirectoryOrCreate
+        - name: dev-vsock
+          hostPath:
+            path: /dev/vsock
+            type: CharDevice
+        - name: host-socat
+          hostPath:
+            path: /usr/bin/socat
+            type: File

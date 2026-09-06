@@ -34,3 +34,8 @@ policies:
       - name: policy-intel-tdx-dcap-qgs-scc
     manifests:
       - path: manifests/qgs-config
+  - name: policy-intel-tdx-dcap-vsock-proxy
+    dependencies:
+      - name: policy-intel-tdx-dcap-qgs-config
+    manifests:
+      - path: manifests/vsock-proxy
