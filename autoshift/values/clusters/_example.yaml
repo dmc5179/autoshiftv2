@@ -284,3 +284,13 @@ clusters:
       # Openshift Ai Models
       # =======================================================================
       openshift-ai-models: 'false'
+      # =======================================================================
+      # Openshift Lightspeed
+      # =======================================================================
+      openshift-lightspeed: 'false'
+      openshift-lightspeed-subscription-name: lightspeed-operator
+      openshift-lightspeed-channel: stable
+      openshift-lightspeed-source: redhat-operators
+      openshift-lightspeed-source-namespace: openshift-marketplace
+      openshift-lightspeed-version: ''
+
