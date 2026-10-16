@@ -275,3 +275,8 @@ clusters:
       openshift-ai-source-namespace: openshift-marketplace
       openshift-ai-version: ''
 
+      # =======================================================================
+      # Openshift Ai Maas
+      # =======================================================================
+      openshift-ai-maas: 'false'
+
