@@ -2004,3 +2004,13 @@ hubClusterSets:
       connectivity-link-source-namespace: openshift-marketplace
       connectivity-link-version: ''
 
+      # =======================================================================
+      # Openshift Ai
+      # =======================================================================
+      openshift-ai: 'false'
+      openshift-ai-subscription-name: rhods-operator
+      openshift-ai-channel: stable-3.x
+      openshift-ai-source: redhat-operators
+      openshift-ai-source-namespace: openshift-marketplace
+      openshift-ai-version: ''
+
