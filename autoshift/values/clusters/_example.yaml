@@ -255,3 +255,13 @@ clusters:
       nvidia-gpu-operator-source-namespace: openshift-marketplace
       nvidia-gpu-operator-version: ''
 
+      # =======================================================================
+      # Connectivity Link
+      # =======================================================================
+      connectivity-link: 'false'
+      connectivity-link-subscription-name: rhcl-operator
+      connectivity-link-channel: stable
+      connectivity-link-source: redhat-operators
+      connectivity-link-source-namespace: openshift-marketplace
+      connectivity-link-version: ''
+
