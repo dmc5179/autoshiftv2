@@ -1984,3 +1984,13 @@ hubClusterSets:
       leader-worker-set-source-namespace: openshift-marketplace
       leader-worker-set-version: ''
 
+      # =======================================================================
+      # Nvidia Gpu Operator
+      # =======================================================================
+      nvidia-gpu-operator: 'false'
+      nvidia-gpu-operator-subscription-name: gpu-operator-certified
+      nvidia-gpu-operator-channel: v25.3
+      nvidia-gpu-operator-source: certified-operators
+      nvidia-gpu-operator-source-namespace: openshift-marketplace
+      nvidia-gpu-operator-version: ''
+
