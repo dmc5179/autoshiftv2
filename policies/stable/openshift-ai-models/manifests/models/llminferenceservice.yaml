@@ -87,6 +87,25 @@ object-templates-raw: |
                 - --ssl-certfile=/var/run/kserve/tls/tls.crt
                 - --ssl-keyfile=/var/run/kserve/tls/tls.key
                 - --enable-force-include-usage
+                {{hub- $parser := (dig "toolCallParser" "" $m) hub}}
+                {{hub- if $parser hub}}
+                # Tool calling is off unless a parser is named. vLLM will not
+                # emit tool calls without both flags, so an agentic client or
+                # OpenShift Lightspeed talking to this model simply never gets
+                # a tool call back — it looks like the model declining to use
+                # tools rather than like a missing runtime flag.
+                #
+                # The parser is model-specific: granite-4.0-h-* uses granite4
+                # (Granite 3.x uses granite), Qwen3 uses hermes, gpt-oss uses
+                # openai, Llama 3.1 uses llama3_json and additionally needs an
+                # explicit --chat-template. Gemma has no parser in 3.5 and
+                # cannot do tool calling at all.
+                - --enable-auto-tool-choice
+                - --tool-call-parser={{hub $parser hub}}
+                {{hub- if (dig "chatTemplate" "" $m) hub}}
+                - --chat-template={{hub (dig "chatTemplate" "" $m) hub}}
+                {{hub- end hub}}
+                {{hub- end hub}}
               ports:
                 - containerPort: 8000
                   name: http

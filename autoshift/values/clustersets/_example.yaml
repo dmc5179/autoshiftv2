@@ -80,6 +80,12 @@ hubClusterSets:
             # Free tier applied to accessGroup (default system:authenticated).
             tokenRateLimit: 100
             tokenRateWindow: '1m'
+            # Tool calling. Off unless a parser is named, and the parser is
+            # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
+            # gpt-oss -> openai, Llama 3.1 -> llama3_json (which also needs
+            # chatTemplate). Gemma has no parser and cannot do tool calling.
+            # Required for OpenShift Lightspeed or any agentic client.
+            toolCallParser: 'granite4'
       # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).

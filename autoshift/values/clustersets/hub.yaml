@@ -29,6 +29,12 @@ hubClusterSets:
             limitsMemory: '24Gi'
             tokenRateLimit: 100
             tokenRateWindow: '1m'
+            # Tool calling. Off unless a parser is named, and the parser is
+            # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
+            # gpt-oss -> openai, Llama 3.1 -> llama3_json (which also needs
+            # chatTemplate). Gemma has no parser and cannot do tool calling.
+            # Required for OpenShift Lightspeed or any agentic client.
+            toolCallParser: 'granite4'
       # Manual remediations - STIG findings the Compliance Operator ships no fix for, because each
       # needs a site decision. Enabled by the manual-remediations label below; every entry renders
       # nothing until its key is set. See docs/compliance.md.
