@@ -24,6 +24,12 @@ object-templates-raw: |
         name: {{hub $ns hub}}
         labels:
           opendatahub.io/dashboard: 'true'
+          # Required for the model's HTTPRoute to attach to the MaaS gateway,
+          # whose listeners use allowedRoutes.namespaces.from: Selector with
+          # exactly this label. Without it the HTTPRoute is created, reports
+          # nothing wrong, and the gateway returns 404 for the model — the
+          # failure gives no indication that a namespace label is the cause.
+          maas.opendatahub.io/gateway-access: 'true'
   {{hub- end hub}}
   {{hub- range $m := $models hub}}
   {{hub- $name := (dig "name" "" $m) hub}}
