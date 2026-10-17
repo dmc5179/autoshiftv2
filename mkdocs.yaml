@@ -127,6 +127,7 @@ nav:
   - Development:
     - Developer Guide: docs/developer-guide.md
     - Repository Layout: docs/repository-layout.md
+    - Adding a Platform: docs/adding-a-platform.md
     - Policy Behavior: docs/policy-behavior.md
     - Documentation Style: docs/documentation-style.md
     - Diagram Style: docs/diagrams/README.md
