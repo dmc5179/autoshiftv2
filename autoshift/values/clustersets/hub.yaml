@@ -295,7 +295,13 @@ hubClusterSets:
       master-kube-reserved-memory: '1536Mi'
       master-kube-reserved-cpu: '500m'
       ### Infrastructure Nodes
-      infra-nodes: '3'
+      # Blank = not managed. Dedicated infra nodes are three more instances, and on a cluster
+      # installed into a pre-existing VPC the AWS node policies cannot provision them at all:
+      # they rebuild the subnet reference as a tag:Name filter from the infrastructure ID, which
+      # matches nothing when the VPC was not created by the installer. See
+      # https://github.com/auto-shift/autoshiftv2/issues/282. Set this only on a cluster whose
+      # VPC the installer owns, and that is big enough to want the separation.
+      infra-nodes: ''
       infra-nodes-provider: aws
       infra-nodes-instance-type: 'm5.2xlarge'
       infra-nodes-numcpu: ''
