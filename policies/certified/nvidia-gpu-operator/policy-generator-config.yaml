@@ -10,6 +10,10 @@ metadata:
 # renders the shared components/operator-install chart. Add further CRs as new policies[] entries
 # pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
 # Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+# Several policies share placement.yaml, so the shared PlacementBinding
+# needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-nvidia-gpu
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -35,3 +39,20 @@ policies:
   - name: policy-nvidia-gpu-operator-install
     manifests:
       - path: manifests/operator-install
+  # The CRD only exists once the operator CSV has installed it, hence the
+  # dependency: a ConfigurationPolicy for an unknown kind reports Compliant
+  # while doing nothing.
+  - name: policy-nvidia-gpu-cluster-policy
+    consolidateManifests: false
+    dependencies:
+      - name: policy-nvidia-gpu-operator-install
+    manifests:
+      - path: manifests/cluster-policy
+  # inform: the stack takes ~15 minutes to build and load the driver; this is
+  # how you see it finish, or see which component failed.
+  - name: policy-nvidia-gpu-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-nvidia-gpu-cluster-policy
+    manifests:
+      - path: test/gpu-stack-ready.yaml
