@@ -10,6 +10,10 @@ metadata:
 # renders the shared components/operator-install chart. Add further CRs as new policies[] entries
 # pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
 # Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+# Several policies share placement.yaml, so the shared PlacementBinding
+# needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-lws
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -35,3 +39,11 @@ policies:
   - name: policy-lws-operator-install
     manifests:
       - path: manifests/operator-install
+  # inform: surfaces the controller not running, which an OperatorPolicy
+  # reporting only on the Subscription and CSV would not catch.
+  - name: policy-lws-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-lws-operator-install
+    manifests:
+      - path: test/lws-ready.yaml

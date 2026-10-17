@@ -1,0 +1,12 @@
+# Inform-only: Compliant once the Leader Worker Set controller is actually
+# serving. The OperatorPolicy reports on the Subscription and CSV; this
+# reports on the workload, which is what callers depend on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lws-controller-manager
+  namespace: openshift-lws-operator
+status:
+  conditions:
+    - type: Available
+      status: 'True'
