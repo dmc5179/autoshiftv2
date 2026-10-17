@@ -1,0 +1,68 @@
+# Register each served model with Models-as-a-Service: who may call it, and how fast.
+#
+# Split from the LLMInferenceService policy because these are different CRDs owned by a different
+# operator, on a different readiness timeline - the MaaS CRDs only exist once the MaaS stack is
+# up, while an LLMInferenceService is just a KServe resource. Keeping them apart means a MaaS
+# problem shows as one NonCompliant policy rather than blocking the model from being served at all.
+#
+# Three resources per model:
+#   MaaSModelRef     - makes the model visible to MaaS
+#   MaaSAuthPolicy   - who may call it
+#   MaaSSubscription - the rate limit applied to those callers
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "openshiftAiModels" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $ns := (dig "namespace" "llm" $cfg) hub}}
+  {{hub- $maasNs := (dig "maasNamespace" "models-as-a-service" $cfg) hub}}
+  {{hub- range $m := (dig "models" (list) $cfg) hub}}
+  {{hub- $name := (dig "name" "" $m) hub}}
+  {{hub- $group := (dig "accessGroup" "system:authenticated" $m) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSModelRef
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub $ns hub}}
+        annotations:
+          openshift.io/display-name: {{hub (dig "displayName" $name $m) | quote hub}}
+      spec:
+        modelRef:
+          kind: LLMInferenceService
+          name: {{hub $name hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSAuthPolicy
+      metadata:
+        name: {{hub $name hub}}-access
+        namespace: {{hub $maasNs hub}}
+      spec:
+        modelRefs:
+          - name: {{hub $name hub}}
+            namespace: {{hub $ns hub}}
+        subjects:
+          groups:
+            - name: {{hub $group hub}}
+          users: []
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSSubscription
+      metadata:
+        name: {{hub $name hub}}-default
+        namespace: {{hub $maasNs hub}}
+      spec:
+        owner:
+          groups:
+            - name: {{hub $group hub}}
+          users: []
+        modelRefs:
+          - name: {{hub $name hub}}
+            namespace: {{hub $ns hub}}
+            tokenRateLimits:
+              - limit: {{hub (dig "tokenRateLimit" 100 $m) hub}}
+                window: {{hub (dig "tokenRateWindow" "1m" $m) | quote hub}}
+        priority: {{hub (dig "priority" 10 $m) hub}}
+  {{hub- end hub}}

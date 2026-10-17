@@ -4,10 +4,16 @@ metadata:
   name: openshift-ai-models
 # Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
 # `kustomize build` runs. They live here and in placement.yaml — never in manifests/, whose hub
-# templates contain `$vars` that substitution would clobber.
+# templates contain `$vars` that substitution would clobber. The manifests read the policy
+# namespace from .PolicyMetadata.namespace instead.
 #
-# Each policy references a single bare manifest file (manifests/<policy>.yaml). Add another policy
-# by dropping manifests/<name>.yaml + a policies[] entry here (re-run generate-policy.sh --dir <this>).
+# Which models a cluster serves comes from config.openshiftAiModels in its rendered-config, not
+# from labels: a model is a structured record (uri, image, resources, rate limit), and a label is
+# a string.
+#
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-openshift-ai-models
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -28,8 +34,31 @@ policyDefaults:
   placement:
     placementPath: placement.yaml
 policies:
+  # Serving. Depends on the MaaS stack only for the Gateway the router attaches to.
   - name: policy-openshift-ai-models
     dependencies:
       - name: policy-openshift-ai-maas
     manifests:
-      - path: manifests/openshift-ai-models.yaml
+      - path: manifests/models/llminferenceservice.yaml
+  # MaaS registration. Separate because these CRDs belong to the MaaS operator and appear later
+  # than KServe's; a ConfigurationPolicy naming a CRD that does not exist yet reports Compliant
+  # while doing nothing, so the dependency is what makes this assertion mean anything.
+  - name: policy-openshift-ai-models-maas
+    dependencies:
+      - name: policy-openshift-ai-models
+    manifests:
+      - path: manifests/maas/registration.yaml
+  - name: policy-openshift-ai-models-ready
+    remediationAction: inform
+    # customMessage below requires this: PolicyGenerator rejects a per-manifest message when
+    # manifests are consolidated into one ConfigurationPolicy.
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-models-maas
+    manifests:
+      - path: test/models-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ A configured model is not serving. Check the LLMInferenceService for a pending
+            pod (no schedulable GPU), an ImagePullBackOff on the runtime image, or an init
+            container still pulling the OCI modelcar.

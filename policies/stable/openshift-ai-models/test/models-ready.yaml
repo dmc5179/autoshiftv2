@@ -1,0 +1,35 @@
+# Did each configured model actually come up?
+#
+# inform-only: a status can only be observed. This is the policy that tells you a model is
+# serving, as opposed to merely having been created - the gap between the two is where the
+# interesting failures live (modelcar pull, no schedulable GPU, vLLM failing to load weights),
+# and all of them leave a perfectly healthy-looking LLMInferenceService behind.
+#
+# Readiness is asserted on the LLMInferenceService's Ready condition rather than on a Deployment
+# name, because KServe owns the workload naming and it is not ours to predict.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "openshiftAiModels" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $ns := (dig "namespace" "llm" $cfg) hub}}
+  {{hub- range $m := (dig "models" (list) $cfg) hub}}
+  {{hub- $name := (dig "name" "" $m) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: serving.kserve.io/v1alpha1
+      kind: LLMInferenceService
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub $ns hub}}
+      status:
+        conditions:
+          - type: Ready
+            status: 'True'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSModelRef
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub $ns hub}}
+  {{hub- end hub}}

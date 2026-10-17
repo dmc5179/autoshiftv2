@@ -1,0 +1,125 @@
+# Serve each model listed in config.openshiftAiModels as an LLMInferenceService.
+#
+# Config-driven rather than a fixed catalogue: which models a cluster serves is a property of that
+# cluster (its GPUs, its tenants, its mirror), not of AutoShift. The list lives in the cluster's
+# rendered-config so a new model is a values change, not a policy change.
+#
+# Everything below the per-model fields - the vLLM entrypoint, the TLS flags, the probe timings,
+# the shared-memory volume - is deliberately NOT configurable. It is runtime boilerplate that is
+# identical for every vLLM CUDA model, and exposing it would mean every model entry had to repeat
+# eighty lines to change a URI.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "openshiftAiModels" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $ns := (dig "namespace" "llm" $cfg) hub}}
+  {{hub- $gw := (dig "gateway" (dict) $cfg) hub}}
+  {{hub- $models := (dig "models" (list) $cfg) hub}}
+  {{hub- if $models hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{hub $ns hub}}
+        labels:
+          opendatahub.io/dashboard: 'true'
+  {{hub- end hub}}
+  {{hub- range $m := $models hub}}
+  {{hub- $name := (dig "name" "" $m) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: serving.kserve.io/v1alpha1
+      kind: LLMInferenceService
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub $ns hub}}
+        annotations:
+          openshift.io/display-name: {{hub (dig "displayName" $name $m) | quote hub}}
+          opendatahub.io/model-type: generative
+          security.opendatahub.io/enable-auth: 'true'
+        labels:
+          opendatahub.io/dashboard: 'true'
+          opendatahub.io/genai-asset: 'true'
+      spec:
+        model:
+          # servedModelName is what callers put in the "model" field of an OpenAI request, and it
+          # is NOT required to equal metadata.name. Defaulting it to the resource name is the safe
+          # choice: a mismatch produces a 404 "the model X does not exist" at inference time, long
+          # after everything has reported healthy. Set it explicitly only when you mean to.
+          name: {{hub (dig "servedModelName" $name $m) hub}}
+          uri: {{hub (dig "uri" "" $m) hub}}
+        replicas: {{hub (dig "replicas" 1 $m) hub}}
+        router:
+          route: {}
+          gateway:
+            refs:
+              - name: {{hub (dig "name" "maas-default-gateway" $gw) hub}}
+                namespace: {{hub (dig "namespace" "openshift-ingress" $gw) hub}}
+        template:
+          # Matches the valueless nvidia.com/gpu:NoSchedule taint the gpu-nodes policy applies.
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
+          containers:
+            - name: main
+              image: {{hub (dig "image" "" $m) hub}}
+              command:
+                - python
+                - -m
+                - vllm.entrypoints.openai.api_server
+              args:
+                # Passed explicitly rather than via KServe's own dot-Name placeholder. That
+                # placeholder is Go template syntax, so ACM would try to resolve it as one of its
+                # own and fail. Avoid writing it even inside a comment here: any surviving brace
+                # pair makes the resolver treat this whole block as still-templated and skip its
+                # YAML validation.
+                - --served-model-name={{hub (dig "servedModelName" $name $m) hub}}
+                - --model=/mnt/models
+                - --enable-ssl-refresh
+                - --ssl-certfile=/var/run/kserve/tls/tls.crt
+                - --ssl-keyfile=/var/run/kserve/tls/tls.key
+                - --enable-force-include-usage
+              ports:
+                - containerPort: 8000
+                  name: http
+                  protocol: TCP
+              # Loading weights from an OCI modelcar takes minutes; the long initialDelay and high
+              # failureThreshold stop the kubelet restart-looping a container that is working.
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 8000
+                  scheme: HTTPS
+                initialDelaySeconds: 300
+                periodSeconds: 30
+                timeoutSeconds: 30
+                failureThreshold: 5
+              readinessProbe:
+                httpGet:
+                  path: /health
+                  port: 8000
+                  scheme: HTTPS
+                initialDelaySeconds: 300
+                periodSeconds: 15
+                timeoutSeconds: 15
+                failureThreshold: 30
+              resources:
+                requests:
+                  cpu: {{hub (dig "requestsCpu" "2" $m) | quote hub}}
+                  memory: {{hub (dig "requestsMemory" "8Gi" $m) hub}}
+                  nvidia.com/gpu: {{hub (dig "gpus" 1 $m) | quote hub}}
+                limits:
+                  cpu: {{hub (dig "limitsCpu" "4" $m) | quote hub}}
+                  memory: {{hub (dig "limitsMemory" "24Gi" $m) hub}}
+                  nvidia.com/gpu: {{hub (dig "gpus" 1 $m) | quote hub}}
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: shm
+          volumes:
+            - name: shm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 2Gi
+  {{hub- end hub}}

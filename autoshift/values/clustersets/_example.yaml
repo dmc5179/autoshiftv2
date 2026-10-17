@@ -51,6 +51,36 @@ hubClusterSets:
   hub:  # ← CHANGE 2: replace with your clusterset name
     config:
       # =======================================================================
+      # openshift-ai-models — which models this cluster serves (DATA; the ENABLE flag is the
+      # openshift-ai-models label below). A model is a structured record, not a string, so it
+      # lives here rather than in a label.
+      # =======================================================================
+      openshiftAiModels:
+        namespace: 'llm'                         # where the LLMInferenceServices live
+        maasNamespace: 'models-as-a-service'     # where MaaS subscriptions live
+        gateway:
+          name: 'maas-default-gateway'
+          namespace: 'openshift-ingress'
+        models:
+          - name: 'granite-4-tiny-gpu'
+            displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+            # servedModelName is what callers put in the "model" field of an OpenAI request.
+            # It defaults to name and should usually be left alone: if it disagrees with what
+            # clients send, inference returns 404 "the model X does not exist" long after every
+            # policy has reported Compliant.
+            # servedModelName: 'granite-4-tiny'
+            uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
+            image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9:3.0'
+            replicas: 1
+            gpus: 1
+            requestsCpu: '2'
+            requestsMemory: '8Gi'
+            limitsCpu: '4'
+            limitsMemory: '24Gi'
+            # Free tier applied to accessGroup (default system:authenticated).
+            tokenRateLimit: 100
+            tokenRateWindow: '1m'
+      # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).
       # =======================================================================

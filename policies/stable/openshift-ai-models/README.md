@@ -1,57 +1,90 @@
-# openshift-ai-models AutoShift Policy
+# openshift-ai-models
 
-## Overview
+Serves models through RHOAI Models-as-a-Service: an `LLMInferenceService` per model, plus the
+MaaS records that say who may call it and how fast.
 
-Deploys large language models behind Models-as-a-Service, using AutoShift's ACM
-**PolicyGenerator** pattern. Each model is an `LLMInferenceService` serving the weights, a
-`MaaSModelRef` publishing it through the gateway, and `MaaSSubscription` resources defining the
-access tiers consumers subscribe to.
+Enabled by the `autoshift.io/openshift-ai-models` label. **What** it serves comes from
+`config.openshiftAiModels` in the cluster's rendered-config, not from labels — a model is a
+structured record (uri, image, resources, rate limit), and a label is a string.
 
-The MaaS platform itself is [openshift-ai-maas](../openshift-ai-maas/README.md).
+## Configuration
 
-## Model weights
-
-Models are pulled as OCI images (modelcars) from `registry.redhat.io` rather than downloaded at
-runtime, which makes pulls repeatable, mirrorable, and viable disconnected. The cluster pull secret
-must therefore cover `registry.redhat.io`.
-
-## A trap worth knowing
-
-vLLM is started with `--served-model-name` taken from the `LLMInferenceService` **metadata.name**,
-while MaaS advertises and forwards `spec.model.name`. If those two disagree, every call fails:
-
-```json
-{"error":{"message":"The model `x` does not exist.","code":404}}
+```yaml
+config:
+  openshiftAiModels:
+    namespace: 'llm'                         # where the LLMInferenceServices live
+    maasNamespace: 'models-as-a-service'
+    gateway:
+      name: 'maas-default-gateway'
+      namespace: 'openshift-ingress'
+    models:
+      - name: 'granite-4-tiny-gpu'
+        displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+        uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
+        image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9:3.0'
+        replicas: 1
+        gpus: 1
+        requestsCpu: '2'
+        requestsMemory: '8Gi'
+        limitsCpu: '4'
+        limitsMemory: '24Gi'
+        tokenRateLimit: 100
+        tokenRateWindow: '1m'
 ```
 
-Routing, auth, and rate limiting all work, and the model listing is populated, so it reads as a
-serving fault rather than a one-line mismatch. Keep the two names identical.
+| Field | Default | Notes |
+|-------|---------|-------|
+| `name` | — | Resource name, and the served model name unless overridden |
+| `servedModelName` | `name` | See the warning below |
+| `uri` | — | OCI modelcar or `hf://` |
+| `image` | — | vLLM runtime image |
+| `displayName` | `name` | Dashboard label |
+| `replicas` | `1` | |
+| `gpus` | `1` | Both request and limit |
+| `requestsCpu` / `requestsMemory` | `2` / `8Gi` | |
+| `limitsCpu` / `limitsMemory` | `4` / `24Gi` | |
+| `accessGroup` | `system:authenticated` | Who may call the model |
+| `tokenRateLimit` / `tokenRateWindow` | `100` / `1m` | |
+| `priority` | `10` | Subscription priority |
 
-## GPU
+The vLLM entrypoint, TLS flags, probe timings and shared-memory volume are deliberately not
+configurable — they are identical for every vLLM CUDA model, and exposing them would mean every
+model entry repeated eighty lines in order to change a URI.
 
-GPU-backed models need a node advertising `nvidia.com/gpu` **before** the model is deployed, which
-means [nvidia-gpu-operator](../../certified/nvidia-gpu-operator/README.md) and
-[node-feature-discovery](../node-feature-discovery/README.md) must already be reconciled. Nodes are
-conventionally tainted `nvidia.com/gpu:NoSchedule`; the model manifests carry the matching
-toleration.
+## `servedModelName` is the one to be careful with
 
-CPU-only models exist and need none of that.
+It is what callers put in the `model` field of an OpenAI-compatible request, and it is **not**
+required to equal `metadata.name`. It defaults to `name` here, which is almost always what you
+want.
 
-## Labels
+If the two disagree, every policy reports Compliant, the pod is Ready, the route answers — and
+inference returns:
 
-| Label | Meaning |
-|---|---|
-| `openshift-ai-models` | enable on this cluster |
-
-Declared in `autoshift/values/clustersets/_example.yaml`. Which models to deploy is config rather
-than a label, read from a ConfigMap rendered by `cluster-config-maps`.
-
-## Test Locally
-
-```bash
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/openshift-ai-models
-
-make test
 ```
+404  The model <name> does not exist
+```
+
+The failure surfaces only at the first real request, which is the worst possible time. Set it
+explicitly only when you mean to.
+
+## Policies
+
+| Policy | Mode | Does |
+|--------|------|------|
+| `policy-openshift-ai-models` | enforce | Namespace + an `LLMInferenceService` per model |
+| `policy-openshift-ai-models-maas` | enforce | `MaaSModelRef`, `MaaSAuthPolicy`, `MaaSSubscription` per model |
+| `policy-openshift-ai-models-ready` | inform | Each model's `Ready` condition, and that its `MaaSModelRef` exists |
+
+Serving and MaaS registration are separate policies because the MaaS CRDs belong to a different
+operator and appear later than KServe's. A `ConfigurationPolicy` naming a CRD that does not exist
+yet reports Compliant while doing nothing, so the dependency chain is what makes the registration
+assertion mean anything.
+
+## Requirements
+
+- `openshift-ai` and `openshift-ai-maas` — the DataScienceCluster and the MaaS gateway
+- A GPU node with the driver stack, for GPU models: `gpu-nodes` plus `nvidia-gpu-operator`.
+  The pod tolerates the valueless `nvidia.com/gpu:NoSchedule` taint `gpu-nodes` applies.
+
+A model pinned to a GPU it cannot get stays Pending indefinitely; `policy-openshift-ai-models-ready`
+is what surfaces that.
