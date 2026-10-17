@@ -1,5 +1,20 @@
-# Cluster-wide Authorino, with TLS on the listener. MaaS talks to Authorino
-# over TLS to authorise API keys; the cert lands in authorino-server-cert.
+# Cluster-wide Authorino. MaaS talks to Authorino to authorise API keys.
+#
+# TLS on the gRPC listener is NOT configured here, deliberately. RHCL deploys
+# Authorino with it disabled, and enabling it in this CR creates a deadlock:
+# Authorino will not start without the certificate secret, the secret is
+# issued by OpenShift's service-ca in response to an annotation on the
+# Authorino Service, and that Service does not exist until Authorino starts.
+# The symptom is Kuadrant stuck at
+#
+#   Ready=False AuthorinoNotReady: listener secret name authorino-server-cert
+#   not found
+#
+# with no Authorino Deployment or Service in the namespace to annotate.
+#
+# TLS is turned on afterwards, in manifests/authorino-tls/, once the Service
+# exists and the secret has been issued. That ordering is the one Red Hat
+# documents for MaaS (access.redhat.com/articles/7147064, step 8).
 apiVersion: operator.authorino.kuadrant.io/v1beta1
 kind: Authorino
 metadata:
@@ -8,11 +23,6 @@ metadata:
 spec:
   clusterWide: true
   replicas: 1
-  listener:
-    tls:
-      enabled: true
-      certSecretRef:
-        name: authorino-server-cert
   oidcServer:
     tls:
       enabled: false

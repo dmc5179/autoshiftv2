@@ -1,0 +1,10 @@
+# The gate between annotating the Service and switching the listener to TLS.
+#
+# inform-only, and load-bearing: enabling TLS before service-ca has issued the
+# Secret puts Authorino into exactly the deadlock this split exists to avoid.
+# The dependency on this policy is what orders the two.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: authorino-server-cert
+  namespace: kuadrant-system
