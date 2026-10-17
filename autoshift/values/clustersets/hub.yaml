@@ -2,6 +2,33 @@
 hubClusterSets:
   hub:
     config:
+      # =====================================================================
+      # openshift-ai-models — which models this cluster serves
+      # =====================================================================
+      # Required by the openshift-ai-models label. A model is a structured
+      # record, not a string, so it lives here rather than in a label.
+      openshiftAiModels:
+        namespace: 'llm'
+        maasNamespace: 'models-as-a-service'
+        gateway:
+          name: 'maas-default-gateway'
+          namespace: 'openshift-ingress'
+        models:
+          - name: 'granite-4-tiny-gpu'
+            displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+            # servedModelName defaults to name. Overriding it so the two
+            # disagree returns 404 "the model X does not exist" at inference
+            # time, long after every policy reports Compliant.
+            uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
+            image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9:3.0'
+            replicas: 1
+            gpus: 1
+            requestsCpu: '2'
+            requestsMemory: '8Gi'
+            limitsCpu: '4'
+            limitsMemory: '24Gi'
+            tokenRateLimit: 100
+            tokenRateWindow: '1m'
       # Manual remediations - STIG findings the Compliance Operator ships no fix for, because each
       # needs a site decision. Enabled by the manual-remediations label below; every entry renders
       # nothing until its key is set. See docs/compliance.md.
@@ -201,16 +228,24 @@ hubClusterSets:
       openshift-version: '4.22.8'
       self-managed: 'true'
       # --- RHOAI Models-as-a-Service -------------------------------------
+      # These four move together. Any subset is broken: the gateway needs the
+      # DataScienceCluster, and the models need the gateway. Toggle them with
+      # scripts/autoshift-feature.sh rather than by hand.
+      #
+      # openshift-ai-models additionally needs config.openshiftAiModels below.
+      # Without it the model list is empty, so the policy applies nothing and
+      # reports Compliant — enabled, and silently doing nothing.
       leader-worker-set: 'true'
-      connectivity-link: 'false'
-      openshift-ai: 'false'
+      connectivity-link: 'true'
+      openshift-ai: 'true'
       openshift-ai-subscription-name: rhods-operator
       openshift-ai-channel: stable-3.x
       openshift-ai-source: redhat-operators
       openshift-ai-source-namespace: openshift-marketplace
       openshift-ai-version: ''
 
-      openshift-ai-maas: 'false'
+      openshift-ai-maas: 'true'
+      openshift-ai-models: 'true'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator
