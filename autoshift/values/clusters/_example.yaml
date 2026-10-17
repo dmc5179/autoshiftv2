@@ -89,6 +89,15 @@ clusters:
       storage-nodes-instance-type: 'm6in.8xlarge'
 
       # =======================================================================
+      # GPU Node Sizing
+      # =======================================================================
+      gpu-nodes: '1'
+      gpu-nodes-provider: aws
+      gpu-nodes-instance-type: 'g6.xlarge'
+      gpu-nodes-zone-1: 'us-east-2a'
+      gpu-nodes-spot: 'false'
+
+      # =======================================================================
       # Master Nodes (SNO / Compact clusters)
       # =======================================================================
       master-nodes: 'true'
