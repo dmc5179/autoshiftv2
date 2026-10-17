@@ -6,14 +6,19 @@ metadata:
 spec:
   # No spec.clusterSets: selects across all ManagedClusterSetBindings in this namespace,
   # filtered by the predicate below.
+  # No cluster-type predicate. The scaffolder emits cluster-type: spoke by
+  # default, which never matches a self-managed hub — the hub is labelled
+  # cluster-type: hub, so the policy is simply never placed. It then has no
+  # status at all rather than reporting a failure, which reads as "fine" in
+  # any check that looks for NonCompliant.
+  #
+  # The enablement label below already gates this policy, and openshift-ai,
+  # connectivity-link, node-feature-discovery and nvidia-gpu-operator all rely
+  # on that alone. Matching them keeps the RHOAI chain placeable on a hub.
   predicates:
     - requiredClusterSelector:
         labelSelector:
           matchExpressions:
-            - key: 'autoshift.io/cluster-type'
-              operator: In
-              values:
-                - 'spoke'
             - key: 'autoshift.io/openshift-ai-models'
               operator: In
               values:
