@@ -14,6 +14,17 @@ helmCharts:
       namespace: nvidia-gpu-operator
       remediation: ${REMEDIATION}
       policyNamespace: ${POLICY_NAMESPACE}
+      # OwnNamespace install mode. The GPU operator's CSV declares
+      # AllNamespaces=false and OwnNamespace=true, so the chart's default
+      # (empty -> AllNamespaces, cluster-scoped) produces an OperatorGroup OLM
+      # refuses, and the CSV never leaves Failed:
+      #   UnsupportedOperatorGroup: AllNamespaces InstallModeType not
+      #   supported, cannot configure to watch all namespaces
+      # The policy still reports only "the ClusterServiceVersion required by
+      # the policy was not found", so the cause is a CSV describe away rather
+      # than visible in the policy status.
+      targetNamespaces:
+        - nvidia-gpu-operator
       subscription:
         name: '{{hub index .ManagedClusterLabels "autoshift.io/nvidia-gpu-operator-subscription-name" | default "gpu-operator-certified" hub}}'
         channel: '{{hub index .ManagedClusterLabels "autoshift.io/nvidia-gpu-operator-channel" | default "v25.3" hub}}'
