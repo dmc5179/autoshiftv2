@@ -1,0 +1,55 @@
+# The MaaS gateway. Hostname and TLS cert are discovered on the managed
+# cluster rather than configured: the hostname follows the cluster's own
+# ingress domain, and the serving cert is whatever the default IngressController
+# already uses, so this works on any cluster without being told its DNS.
+#
+# A regular {{ }} template resolves on the managed cluster; {{hub hub}} would
+# resolve on the hub, where neither of these is known.
+#
+# spec.domain is read directly rather than through dig with a fallback: every
+# cluster has a default IngressController, so a missing one means something is
+# genuinely wrong and should surface rather than render "maas." and look fine.
+# defaultCertificate does get a fallback, because it is legitimately unset on a
+# cluster still using the operator-generated serving cert.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: maas-default-gateway
+  namespace: openshift-ingress
+  annotations:
+    opendatahub.io/managed: "false"
+    security.opendatahub.io/authorino-tls-bootstrap: "true"
+spec:
+  gatewayClassName: openshift-default
+  infrastructure:
+    parametersRef:
+      group: ""
+      kind: ConfigMap
+      name: maas-gateway-options
+  listeners:
+    - name: http
+      hostname: '{{ printf "maas.%s" (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec.domain }}'
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              maas.opendatahub.io/gateway-access: "true"
+    - name: https
+      hostname: '{{ printf "maas.%s" (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec.domain }}'
+      port: 443
+      protocol: HTTPS
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              maas.opendatahub.io/gateway-access: "true"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: '{{ dig "spec" "defaultCertificate" "name" "router-certs-default" ((lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default") | default dict) }}'

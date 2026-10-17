@@ -8,6 +8,8 @@ metadata:
 #
 # Each policy references a single bare manifest file (manifests/<policy>.yaml). Add another policy
 # by dropping manifests/<name>.yaml + a policies[] entry here (re-run generate-policy.sh --dir <this>).
+placementBindingDefaults:
+  name: binding-policy-openshift-ai-maas
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -32,4 +34,12 @@ policies:
     dependencies:
       - name: policy-openshift-ai-operator-install
     manifests:
-      - path: manifests/openshift-ai-maas.yaml
+      - path: manifests
+  # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
+  # it never reaches it without MetalLB, so this is where that shows up.
+  - name: policy-openshift-ai-maas-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-openshift-ai-maas
+    manifests:
+      - path: test/gateway-programmed.yaml

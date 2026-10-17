@@ -1,0 +1,13 @@
+# Inform-only: Compliant once the Gateway is Programmed. This is the single
+# most useful MaaS signal. Off-cloud it stays Pending forever without MetalLB,
+# because there is no load balancer to assign an external address - enable the
+# metallb policy there.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: maas-default-gateway
+  namespace: openshift-ingress
+status:
+  conditions:
+    - type: Programmed
+      status: 'True'
