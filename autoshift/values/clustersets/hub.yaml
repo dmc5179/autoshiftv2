@@ -498,8 +498,19 @@ hubClusterSets:
       mtv-source: redhat-operators
       mtv-source-namespace: openshift-marketplace
       # mtv-version: 'mtv-operator.v2.12.7'
+      ### nvidia-gpu-operator
+      # Needs node-feature-discovery below: the GPU operator keys its driver
+      # DaemonSets off the PCI labels NFD applies, so on its own it installs and
+      # then does nothing. A GPU node with no driver stack looks completely
+      # healthy - Ready, schedulable - while reporting no nvidia.com/gpu
+      # capacity, so GPU pods just sit Pending.
+      nvidia-gpu-operator: 'true'
+      nvidia-gpu-operator-subscription-name: gpu-operator-certified
+      nvidia-gpu-operator-channel: v25.3
+      nvidia-gpu-operator-source: certified-operators
+      nvidia-gpu-operator-source-namespace: openshift-marketplace
       ### node-feature-discovery
-      node-feature-discovery: 'false'
+      node-feature-discovery: 'true'
       node-feature-discovery-subscription-name: nfd
       node-feature-discovery-channel: stable
       node-feature-discovery-source: redhat-operators
