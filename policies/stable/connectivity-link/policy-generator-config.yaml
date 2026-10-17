@@ -10,6 +10,10 @@ metadata:
 # renders the shared components/operator-install chart. Add further CRs as new policies[] entries
 # pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
 # Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+# Several policies share placement.yaml, so the shared PlacementBinding
+# needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-rhcl
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -35,3 +39,20 @@ policies:
   - name: policy-rhcl-operator-install
     manifests:
       - path: manifests/operator-install
+  # Kuadrant and Authorino CRs. Separate from the install because their CRDs
+  # arrive with the CSV, and a ConfigurationPolicy for an unknown kind reports
+  # Compliant while doing nothing.
+  - name: policy-rhcl-kuadrant
+    consolidateManifests: false
+    dependencies:
+      - name: policy-rhcl-operator-install
+    manifests:
+      - path: manifests/kuadrant
+  # inform: MaaS blocks on Kuadrant being Ready, so surface it here rather
+  # than letting it present as an unprogrammed gateway later.
+  - name: policy-rhcl-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-rhcl-kuadrant
+    manifests:
+      - path: test/kuadrant-ready.yaml
