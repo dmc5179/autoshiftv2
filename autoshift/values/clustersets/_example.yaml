@@ -2043,6 +2043,19 @@ hubClusterSets:
       openshift-lightspeed-source: redhat-operators
       openshift-lightspeed-source-namespace: openshift-marketplace
       openshift-lightspeed-version: ''
+      # The model id the gateway advertises, e.g.
+      # 'publishers/llm/models/granite-4-tiny-gpu'. No default: it cannot be
+      # discovered from a template (only the gateway's own model listing knows
+      # it), and a wrong value gives an assistant that errors on every
+      # question, so an unset label should fail visibly rather than guess.
+      openshift-lightspeed-model: ''
+      # Secret holding the MaaS API key, created out of band by an
+      # administrator - credentials never come from git:
+      #   oc create secret generic maas-api-key -n openshift-lightspeed \
+      #     --from-literal=apitoken=<key>
+      # The key inside the Secret is always 'apitoken', whatever the provider
+      # calls it.
+      openshift-lightspeed-secret: maas-api-key
 
 
       # =======================================================================

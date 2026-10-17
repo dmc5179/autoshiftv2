@@ -10,6 +10,8 @@ metadata:
 # renders the shared components/operator-install chart. Add further CRs as new policies[] entries
 # pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
 # Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+placementBindingDefaults:
+  name: binding-policy-ols
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -35,3 +37,20 @@ policies:
   - name: policy-ols-operator-install
     manifests:
       - path: manifests/operator-install
+  # The OLSConfig CRD arrives with the CSV, so this depends on the install.
+  # Also depends on MaaS: the provider URL points at the MaaS gateway, and
+  # pointing Lightspeed at an endpoint that does not exist yet just produces
+  # an assistant that errors on every question.
+  - name: policy-ols-config
+    consolidateManifests: false
+    dependencies:
+      - name: policy-ols-operator-install
+      - name: policy-openshift-ai-maas
+    manifests:
+      - path: manifests/olsconfig
+  - name: policy-ols-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-ols-config
+    manifests:
+      - path: test/ols-ready.yaml

@@ -1,0 +1,43 @@
+# Points the console assistant at a model served locally through MaaS, so
+# cluster questions are answered on your own hardware rather than by a SaaS
+# provider.
+#
+# Three details that are easy to get wrong, all from the Lightspeed docs:
+#   - the Secret key is always "apitoken", whatever the provider calls it
+#   - the provider URL must end in /v1
+#   - rhoai_vllm is the right type for a self-hosted vLLM endpoint
+#
+# The URL is discovered on the managed cluster from the default
+# IngressController, the same way the MaaS gateway builds its hostname, so
+# this works on any cluster without being told its DNS. The model id and the
+# Secret name come from hub labels, because neither can be discovered: the
+# model id is only known by querying the gateway's own model listing, which a
+# template cannot do.
+#
+# The Secret itself is created out of band by an administrator and is never
+# in git. Mint a MaaS API key, then:
+#
+#   oc create secret generic maas-api-key -n openshift-lightspeed \
+#     --from-literal=apitoken=<key>
+#
+# MaaS keys expire. Lightspeed has no rotation of its own, so use a long TTL
+# and re-create the Secret before it lapses. Upstream work that would remove
+# this entirely is tracked as UIERFE-5, which adds OAuth2 client-credentials
+# token refresh to the vLLM provider.
+apiVersion: ols.openshift.io/v1alpha1
+kind: OLSConfig
+metadata:
+  name: cluster
+spec:
+  llm:
+    providers:
+      - name: maas
+        type: rhoai_vllm
+        url: '{{ printf "https://maas.%s/v1" (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec.domain }}'
+        credentialsSecretRef:
+          name: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-secret" | default "maas-api-key" hub}}'
+        models:
+          - name: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-model" hub}}'
+  ols:
+    defaultProvider: maas
+    defaultModel: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-model" hub}}'
