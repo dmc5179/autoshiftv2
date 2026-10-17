@@ -158,6 +158,17 @@ hubClusterSets:
       # OpenShift version for cluster deployment and image mirroring
       openshift-version: '4.22.8'
       self-managed: 'true'
+      # --- RHOAI Models-as-a-Service -------------------------------------
+      leader-worker-set: 'true'
+      connectivity-link: 'false'
+      openshift-ai: 'false'
+      openshift-ai-subscription-name: rhods-operator
+      openshift-ai-channel: stable-3.x
+      openshift-ai-source: redhat-operators
+      openshift-ai-source-namespace: openshift-marketplace
+      openshift-ai-version: ''
+
+      openshift-ai-maas: 'true'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator

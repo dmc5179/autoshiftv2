@@ -305,3 +305,13 @@ clusters:
       openshift-lightspeed-source-namespace: openshift-marketplace
       openshift-lightspeed-version: ''
 
+
+      # =======================================================================
+      # Mcp Gateway
+      # =======================================================================
+      mcp-gateway: 'false'
+      mcp-gateway-subscription-name: mcp-gateway
+      mcp-gateway-channel: preview
+      mcp-gateway-source: redhat-operators
+      mcp-gateway-source-namespace: openshift-marketplace
+      mcp-gateway-version: ''
