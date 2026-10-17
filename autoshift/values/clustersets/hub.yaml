@@ -321,7 +321,13 @@ hubClusterSets:
       worker-kube-reserved-memory: '512Mi'
       worker-kube-reserved-cpu: '250m'
       ### Storage Nodes
-      storage-nodes: '3'
+      # Blank = not managed, which is the default the other clustersets use
+      # (hub1, hub2, hubofhubs, managed, sbx). A blank value is not stamped onto
+      # the ManagedCluster at all, so the placement's Exists predicate fails and
+      # the policy deselects cleanly - it is a real off switch, not an empty
+      # replica count. Only set this if you want OpenShift Data Foundation; the
+      # nodes exist to carry it.
+      storage-nodes: ''
       # storage-nodes-zone-1: 'us-east-2a'
       # storage-nodes-zone-2: 'us-east-2b'
       # storage-nodes-zone-3: 'us-east-2c'
@@ -357,7 +363,10 @@ hubClusterSets:
       local-storage-source: redhat-operators
       local-storage-source-namespace: openshift-marketplace
       ### OpenShift Data Foundation
-      odf: 'true'
+      # Off by default. ODF is a deliberate, expensive opt-in: the settings
+      # below ask for 2Ti x 2 devices x 3 replicas on dedicated m6in.8xlarge
+      # storage nodes. Turning it on means also setting storage-nodes above.
+      odf: 'false'
       odf-subscription-name: odf-operator
       # odf-version: 'odf-operator.v4.22.2-rhodf'
       odf-multi-cloud-gateway: standard
