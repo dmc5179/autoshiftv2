@@ -14,6 +14,12 @@ helmCharts:
       namespace: openshift-sandboxed-containers-operator
       remediation: ${REMEDIATION}
       policyNamespace: ${POLICY_NAMESPACE}
+      # OwnNamespace. Verified against the catalog on OpenShift 4.22: this
+      # operator's CSV declares AllNamespaces=False, OwnNamespace=True, so the
+      # chart's default (empty -> AllNamespaces) produces an OperatorGroup OLM
+      # refuses and the CSV never leaves Failed with UnsupportedOperatorGroup.
+      targetNamespaces:
+        - openshift-sandboxed-containers-operator
       subscription:
         name: '{{hub index .ManagedClusterLabels "autoshift.io/osc-subscription-name" | default "sandboxed-containers-operator" hub}}'
         channel: '{{hub index .ManagedClusterLabels "autoshift.io/osc-channel" | default "stable" hub}}'

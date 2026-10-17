@@ -2057,7 +2057,7 @@ hubClusterSets:
       # ready when ZTWIM is installed into an openshift-* namespace, so the policy uses its
       # suggested namespace instead.
       ztwim: 'false'
-      ztwim-subscription-name: zero-trust-workload-identity-manager
+      ztwim-subscription-name: openshift-zero-trust-workload-identity-manager
       ztwim-channel: stable-v1
       ztwim-source: redhat-operators
       ztwim-source-namespace: openshift-marketplace

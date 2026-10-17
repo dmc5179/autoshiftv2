@@ -151,26 +151,14 @@ OpenShell's preflight checks for `sandboxes.agents.x-k8s.io` serving `v1beta1` p
 - OpenShift 4.19+
 - **RHCOS worker nodes. RHEL nodes are not supported.**
 
-## ⚠️ Install mode is unverified
+## Install mode
 
-This policy uses the shared chart's default, an **AllNamespaces** (cluster-scoped) OperatorGroup,
-because no `targetNamespaces` is set. That has not been checked against this operator's CSV.
+Verified against the catalog on OpenShift 4.22, `agent-sandbox-operator` v0.9.0:
 
-An operator whose CSV declares `AllNamespaces=false` will sit in `Failed` with
-`UnsupportedOperatorGroup`, and the policy will report only "the ClusterServiceVersion required by
-the policy was not found" — which reads like a catalog problem rather than an OperatorGroup the API
-server refused. The nvidia-gpu-operator policy shipped with exactly this defect
-(auto-shift/autoshiftv2#283).
-
-Before trusting this policy, check:
-
-```bash
-oc get csv <csv> -n <namespace> -o jsonpath='{range .spec.installModes[*]}{.type}={.supported}{"\n"}{end}'
+```
+OwnNamespace=False  SingleNamespace=False  MultiNamespace=False  AllNamespaces=True
 ```
 
-If `AllNamespaces=false`, add to `manifests/operator-install/kustomization.yaml`:
-
-```yaml
-      targetNamespaces:
-        - <namespace>
-```
+AllNamespaces is the only mode this operator supports, which is what the shared chart produces by
+default, so no `targetNamespaces` is set. That matches the Red Hat guide, which installs it into
+`agent-sandbox-system` in *All namespaces* mode.

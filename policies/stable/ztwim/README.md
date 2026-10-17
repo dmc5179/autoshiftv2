@@ -142,26 +142,17 @@ without testing that path will produce an operator that installs cleanly and the
 
 Only needed for SPIFFE agent identity / token exchange. Drop it if you are not doing that.
 
-## ⚠️ Install mode is unverified
+## Install mode
 
-This policy uses the shared chart's default, an **AllNamespaces** (cluster-scoped) OperatorGroup,
-because no `targetNamespaces` is set. That has not been checked against this operator's CSV.
+Verified against the catalog on OpenShift 4.22,
+`openshift-zero-trust-workload-identity-manager` v1.1.2:
 
-An operator whose CSV declares `AllNamespaces=false` will sit in `Failed` with
-`UnsupportedOperatorGroup`, and the policy will report only "the ClusterServiceVersion required by
-the policy was not found" — which reads like a catalog problem rather than an OperatorGroup the API
-server refused. The nvidia-gpu-operator policy shipped with exactly this defect
-(auto-shift/autoshiftv2#283).
-
-Before trusting this policy, check:
-
-```bash
-oc get csv <csv> -n <namespace> -o jsonpath='{range .spec.installModes[*]}{.type}={.supported}{"\n"}{end}'
+```
+OwnNamespace=True  SingleNamespace=True  MultiNamespace=False  AllNamespaces=True
 ```
 
-If `AllNamespaces=false`, add to `manifests/operator-install/kustomization.yaml`:
+AllNamespaces is supported, so the chart default is correct and no `targetNamespaces` is set.
 
-```yaml
-      targetNamespaces:
-        - <namespace>
-```
+Note the package is `openshift-zero-trust-workload-identity-manager`, with the `openshift-`
+prefix. The OpenShell imageset configuration names it without one, which resolves to nothing in
+the Red Hat catalog.

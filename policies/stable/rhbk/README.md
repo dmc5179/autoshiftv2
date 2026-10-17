@@ -141,26 +141,14 @@ Port-forward access works without it, but that is an evaluation path only.
 OpenShell's own demo material deploys a raw `keycloak-rhel9` image; its validation table says to use
 the RHBK operator in production, which is what this policy installs.
 
-## ⚠️ Install mode is unverified
+## Install mode
 
-This policy uses the shared chart's default, an **AllNamespaces** (cluster-scoped) OperatorGroup,
-because no `targetNamespaces` is set. That has not been checked against this operator's CSV.
+Verified against the catalog on OpenShift 4.22, `rhbk-operator` v26.6.7:
 
-An operator whose CSV declares `AllNamespaces=false` will sit in `Failed` with
-`UnsupportedOperatorGroup`, and the policy will report only "the ClusterServiceVersion required by
-the policy was not found" — which reads like a catalog problem rather than an OperatorGroup the API
-server refused. The nvidia-gpu-operator policy shipped with exactly this defect
-(auto-shift/autoshiftv2#283).
-
-Before trusting this policy, check:
-
-```bash
-oc get csv <csv> -n <namespace> -o jsonpath='{range .spec.installModes[*]}{.type}={.supported}{"\n"}{end}'
+```
+OwnNamespace=True  SingleNamespace=True  MultiNamespace=False  AllNamespaces=False
 ```
 
-If `AllNamespaces=false`, add to `manifests/operator-install/kustomization.yaml`:
-
-```yaml
-      targetNamespaces:
-        - <namespace>
-```
+AllNamespaces is **not** supported, so this policy sets `targetNamespaces`. Without it the shared
+chart's default produces a cluster-scoped OperatorGroup that OLM rejects, and the CSV sits in
+`Failed` with `UnsupportedOperatorGroup` while the policy reports only that the CSV was not found.
