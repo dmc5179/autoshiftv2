@@ -155,6 +155,48 @@ hubClusterSets:
           eda:
             disabled: false
     labels:
+      # =====================================================================
+      # Profile: minimal RHOAI Models-as-a-Service hub
+      # =====================================================================
+      # Nine labels are 'true'. That is deliberate. This file previously had
+      # 59, and adopting a cluster into this clusterset turned all of them on
+      # at once — ACS, AAP, Quay, GitLab, compliance, the full logging and
+      # tracing stack, service mesh, dev-hub, dev-spaces, pipelines. On a
+      # three-worker cluster that produced 99% CPU requested on every worker,
+      # ~270 running pods, and an etcd database at 545 MB against a 4 vCPU /
+      # 16 GiB control plane, whose documented baseline is "up to ~250 MiB and
+      # low load" (access.redhat.com/articles/7132959).
+      #
+      # The visible symptom was not "too much is enabled". It was API server
+      # timeouts, which crash-looped ovnkube-controller, which left nodes
+      # NotReady with no CNI config, which stalled the MachineConfig roll.
+      # Nothing in the policy layer reports "overloaded".
+      #
+      # So: add capability deliberately, one at a time, and watch etcd size
+      # and worker CPU requests after each. Turning everything on to see what
+      # happens is how you get here.
+      #
+      # To enable RHOAI Models-as-a-Service, flip these FOUR together — they
+      # are one chain and any subset is broken:
+      #
+      #     openshift-ai: 'true'          # the DataScienceCluster
+      #     connectivity-link: 'true'     # Kuadrant/Authorino, the gateway
+      #     openshift-ai-maas: 'true'     # the MaaS gateway itself
+      #     openshift-ai-models: 'true'   # plus config.openshiftAiModels
+      #
+      # openshift-ai-maas was previously 'true' while openshift-ai was
+      # 'false', which cannot work: the gateway needs the DataScienceCluster.
+      # Optional on top: openshift-lightspeed, mcp-gateway.
+      #
+      # RHOAI is a large install (~75 GB of images). Do not enable it until
+      # the control plane has headroom.
+      #
+      # Left 'true' on purpose, despite being unrelated to MaaS:
+      # master-nodes and worker-node-config. They generate KubeletConfigs, and
+      # REMOVING a KubeletConfig triggers a full rolling reboot exactly like
+      # adding one did. Reverting them costs another cluster-wide roll for no
+      # benefit. Leave them unless you want that roll.
+      # =====================================================================
       # OpenShift version for cluster deployment and image mirroring
       openshift-version: '4.22.8'
       self-managed: 'true'
@@ -168,7 +210,7 @@ hubClusterSets:
       openshift-ai-source-namespace: openshift-marketplace
       openshift-ai-version: ''
 
-      openshift-ai-maas: 'true'
+      openshift-ai-maas: 'false'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator
@@ -179,7 +221,7 @@ hubClusterSets:
       gitops-source-namespace: openshift-marketplace
       # gitops-namespace: 'openshift-gitops'  # Override ArgoCD namespace per-cluster
       ### AutoShift Console Plugin
-      autoshift-console: 'true' # AutoShift section in the Fleet management perspective
+      autoshift-console: 'false'  # AutoShift section in the Fleet management perspective
       ### Advanced Cluster Management
       acm-subscription-name: advanced-cluster-management
       # acm-version: 'advanced-cluster-management.v2.17.1'
@@ -187,13 +229,13 @@ hubClusterSets:
       acm-source: redhat-operators
       acm-source-namespace: openshift-marketplace
       acm-availability-config: 'High'
-      acm-observability: 'true'
-      acm-search-storage: 'true'
+      acm-observability: 'false'
+      acm-search-storage: 'false'
       # acm-search-storage-class: 'ocs-storagecluster-ceph-rbd'
       # acm-search-storage-size: '100Gi'
-      cluster-install: 'true'
-      acm-enable-provisioning: 'true'
-      acm-addon-tuning: 'true'
+      cluster-install: 'false'
+      acm-enable-provisioning: 'false'
+      acm-addon-tuning: 'false'
       # config-policy-controller tuning (annotations on ManagedClusterAddOn)
       acm-addon-cpc-eval-concurrency: '5'    # Concurrent policy evaluations (default: 2)
       acm-addon-cpc-client-qps: '75'         # K8s API client QPS (default: 30)
@@ -213,45 +255,45 @@ hubClusterSets:
       acm-addon-gpf-cpu-request: '100m'
       acm-addon-gpf-mem-limit: '1Gi'
       ### User Workload Monitoring
-      uwm: 'true'
+      uwm: 'false'
       ### node-maintenance
-      node-maintenance: 'true'
+      node-maintenance: 'false'
       node-maintenance-subscription-name: node-maintenance-operator
       node-maintenance-channel: stable
       node-maintenance-source: redhat-operators
       node-maintenance-source-namespace: openshift-marketplace
       node-maintenance-version: 'node-maintenance-operator.v5.7.1'
       ### Tempo
-      tempo: 'true'
+      tempo: 'false'
       tempo-subscription-name: tempo-product
       tempo-channel: stable
       tempo-source: redhat-operators
       tempo-source-namespace: openshift-marketplace
       # tempo-version: 'tempo-operator.v0.21.0-3'
       ### Kiali
-      kiali: 'true'
+      kiali: 'false'
       kiali-subscription-name: kiali-ossm
       kiali-channel: stable
       kiali-source: redhat-operators
       kiali-source-namespace: openshift-marketplace
       # kiali-version: 'kiali-operator.v2.27.3'
       ### Servicemesh3 Operator
-      servicemesh3operator: 'true'
+      servicemesh3operator: 'false'
       servicemesh3operator-subscription-name: servicemeshoperator3
       servicemesh3operator-channel: stable
       servicemesh3operator-source: redhat-operators
       servicemesh3operator-source-namespace: openshift-marketplace
       # servicemesh3operator-version: 'servicemeshoperator3.v3.4.1'
       ### Servicemesh3 Ambient
-      servicemesh3-ambient: 'true'
+      servicemesh3-ambient: 'false'
       ### OpenTelemetry
-      opentelemetry: 'true'
+      opentelemetry: 'false'
       opentelemetry-subscription-name: opentelemetry-product
       opentelemetry-channel: stable
       opentelemetry-source: redhat-operators
       opentelemetry-source-namespace: openshift-marketplace
       ### external-secrets-operator
-      external-secrets-operator: 'true'
+      external-secrets-operator: 'false'
       external-secrets-operator-subscription-name: openshift-external-secrets-operator
       external-secrets-operator-channel: stable-v1
       external-secrets-operator-source: redhat-operators
@@ -276,16 +318,16 @@ hubClusterSets:
       # Specify the names of your Peer files here
       metallb-peer-1: ''
       ### AAP
-      aap: 'true'
+      aap: 'false'
       aap-subscription-name: ansible-automation-platform-operator
       aap-channel: stable-2.7
       aap-install-plan-approval: Automatic
       aap-source: redhat-operators
       aap-source-namespace: openshift-marketplace
       ### ODF nooBaa Storage - Setting this to true will autocreate a bucket and attach it as hub storage
-      aap-noobaa-s3-storage: 'true'
+      aap-noobaa-s3-storage: 'false'
       ### AAP Custom Cert Bundle Injection
-      aap-custom-cabundle: 'true'
+      aap-custom-cabundle: 'false'
       #aap-version: 'aap-operator.v2.7.0-0.1787240540'
       ### Master Node Kubelet Configuration
       master-nodes: 'true'
@@ -308,8 +350,8 @@ hubClusterSets:
       infra-nodes-memory-mib: ''
       infra-nodes-numcores-per-socket: ''
       infra-nodes-zone-1: ''
-      infra-machineconfigpool: 'true'
-      infra-node-config: 'true'
+      infra-machineconfigpool: 'false'
+      infra-node-config: 'false'
       infra-system-reserved-memory: '2Gi'
       infra-system-reserved-cpu: '500m'
       infra-kube-reserved-memory: '1Gi'
@@ -346,15 +388,15 @@ hubClusterSets:
       storage-nodes-memory-mib: ''
       storage-nodes-numcores-per-socket: ''
       ### Machine Health Checks
-      machine-health-checks: 'true'
-      machine-health-checks-worker: 'true'
-      machine-health-checks-infra: 'true'
+      machine-health-checks: 'false'
+      machine-health-checks-worker: 'false'
+      machine-health-checks-infra: 'false'
       machine-health-checks-storage: 'false'
       ### LVM Operator
       lvm: 'false'
       lvm-subscription-name: lvms-operator
       # lvm-version: 'lvms-operator.v4.18.0-202410091522'
-      lvm-default: 'true'
+      lvm-default: 'false'
       lvm-fstype: xfs
       lvm-size-percent: 90
       lvm-overprovision-ratio: 10
@@ -388,9 +430,9 @@ hubClusterSets:
       odf-source: redhat-operators
       odf-source-namespace: openshift-marketplace
       odf-default-storageclass: ocs-storagecluster-ceph-rbd
-      odf-csi-all-nodes: 'true'            # 'true' to run CSI plugins on all nodes (masters, infra, storage)
+      odf-csi-all-nodes: 'false'  # 'true' to run CSI plugins on all nodes (masters, infra, storage)
       ### OpenShift Internal Registry
-      imageregistry: 'true'
+      imageregistry: 'false'
       imageregistry-management-state: Managed
       imageregistry-replicas: '3'
       imageregistry-storage-type: s3 # pvc
@@ -406,55 +448,55 @@ hubClusterSets:
       # nmstate-version: 'kubernetes-nmstate-operator.4.22.0-202608260901'
       # See _example.yaml for full nmstate label reference
       ### Advanced Cluster Security
-      acs: 'true'
-      acs-default-policies: 'true'          # baseline SecurityPolicy resources (was config.acs.defaultPolicies)
+      acs: 'false'
+      acs-default-policies: 'false'  # baseline SecurityPolicy resources (was config.acs.defaultPolicies)
       acs-subscription-name: rhacs-operator
       # acs-version: 'rhacs-operator.v4.11.3'
       acs-channel: stable
       acs-source: redhat-operators
       acs-source-namespace: openshift-marketplace
       ### Developer Spaces
-      dev-spaces: 'true'
+      dev-spaces: 'false'
       dev-spaces-subscription-name: devspaces
       # dev-spaces-version: 'devspacesoperator.v3.30.0'
       dev-spaces-channel: stable
       dev-spaces-source: redhat-operators
       dev-spaces-source-namespace: openshift-marketplace
       ### Developer Hub
-      dev-hub: 'true'
+      dev-hub: 'false'
       dev-hub-subscription-name: rhdh
       # dev-hub-version: 'rhdh-operator.v1.10.4'
       dev-hub-channel: fast-1.10
       dev-hub-source: redhat-operators
       dev-hub-source-namespace: openshift-marketplace
       ### OpenShift Pipelines
-      pipelines: 'true'
+      pipelines: 'false'
       pipelines-subscription-name: openshift-pipelines-operator-rh
       # pipelines-version: 'openshift-pipelines-operator-rh.v1.23.2'
       pipelines-channel: pipelines-1.23
       pipelines-source: redhat-operators
       pipelines-source-namespace: openshift-marketplace
       ### Trusted Artifact Signer
-      tas: 'true'
+      tas: 'false'
       tas-subscription-name: rhtas-operator
       # tas-version: 'rhtas-operator.v1.4.3'
       tas-channel:  stable
       tas-source: redhat-operators
       tas-source-namespace: openshift-marketplace
       ### Quay
-      quay: 'true'
+      quay: 'false'
       quay-subscription-name: quay-operator
       # quay-version: 'quay-operator.v3.18.0'
       quay-channel: stable-3.18
       quay-source: redhat-operators
       quay-source-namespace: openshift-marketplace
       ### Developer OpenShift Gitops
-      gitops-dev: 'true'
-      gitops-dev-team-test-cluster-scoped: 'true'
+      gitops-dev: 'false'
+      gitops-dev-team-test-cluster-scoped: 'false'
       gitops-dev-team-test: 'hub' #hub or standalone
       # gitops-dev-team-{INSERT_TEAM_NAME}
       ### Loki
-      loki: 'true'
+      loki: 'false'
       loki-subscription-name: loki-operator
       # loki-version: 'loki-operator.v6.6.0'
       loki-channel: stable-6.6
@@ -464,31 +506,31 @@ hubClusterSets:
       loki-storageclass: gp3-csi
       loki-lokistack-name: logging-lokistack
       ### OpenShift Logging
-      logging: 'true'
+      logging: 'false'
       logging-subscription-name: cluster-logging
       # logging-version: 'cluster-logging.v6.6.0'
       logging-channel: stable-6.6
       logging-source: redhat-operators
       logging-source-namespace: openshift-marketplace
       ### Cluster Observability Operator
-      coo: 'true'
+      coo: 'false'
       coo-subscription-name: cluster-observability-operator
       # coo-version: 'cluster-observability-operator.v1.5.2'
       coo-channel: stable
       coo-source: redhat-operators
       coo-source-namespace: openshift-marketplace
       ### Compliance Operator Stig Apply
-      manual-remediations: 'true'
+      manual-remediations: 'false'
       # Opt into individual members. The set gate above plus one of these places a policy;
       # anything not listed here is not deployed at all rather than deployed and inert.
-      manual-remediations-classification-banner: 'true'
-      manual-remediations-motd: 'true'
-      manual-remediations-remove-samples-operator: 'true'
-      manual-remediations-route-rate-limits: 'true'
-      manual-remediations-quota-guard: 'true'
-      manual-remediations-project-template: 'true'
-      compliance: 'true'
-      compliance-auto-remediate: 'true'
+      manual-remediations-classification-banner: 'false'
+      manual-remediations-motd: 'false'
+      manual-remediations-remove-samples-operator: 'false'
+      manual-remediations-route-rate-limits: 'false'
+      manual-remediations-quota-guard: 'false'
+      manual-remediations-project-template: 'false'
+      compliance: 'false'
+      compliance-auto-remediate: 'false'
       compliance-subscription-name: compliance-operator
       compliance-source: redhat-operators
       compliance-source-namespace: openshift-marketplace
@@ -542,8 +584,8 @@ hubClusterSets:
       # gitlab-object-storage-mode: 'managed'  # managed (default), external, or bundled
       gitlab-db-instances: '2'
       gitlab-db-pooler-instances: '2'
-      gitlab-db-backups: 'true'
-      gitlab-gitaly-ha: 'true'
+      gitlab-db-backups: 'false'
+      gitlab-gitaly-ha: 'false'
       gitlab-praefect-replicas: '3'
       gitlab-gitaly-replicas: '3'
       gitlab-gitaly-storage-class: 'ocs-storagecluster-cephfs'
@@ -575,7 +617,7 @@ hubClusterSets:
       jfrog-db-instances: '2'
       jfrog-db-pooler-instances: '2'
       jfrog-node-replicas: '2'
-      artifactory-db-backups: 'true'
+      artifactory-db-backups: 'false'
       ### cloudnative-pg
       cloudnative-pg: 'false'
       cloudnative-pg-subscription-name: cloudnative-pg
