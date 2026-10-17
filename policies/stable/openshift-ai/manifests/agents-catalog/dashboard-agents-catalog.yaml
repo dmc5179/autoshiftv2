@@ -1,0 +1,20 @@
+# Exposes the Agents catalog, at AI hub -> Agents. Unlike the MCP and model
+# catalogs there is no DataScienceCluster component and no custom-source
+# mechanism - it is a read-only browse surface fed by an image that ships
+# with the operator, so this flag is the whole configuration.
+#
+# Developer Preview in RHOAI 3.5. The flag name is confirmed by the 3.5
+# release notes: "To enable this Developer Preview feature, set the
+# agentsCatalog feature flag to true."
+#
+# Opt-in rather than on by default, because Developer Preview carries no SLA
+# and the catalog is a browse-only surface - there is no reason to turn it on
+# for every cluster that enables OpenShift AI.
+apiVersion: opendatahub.io/v1alpha
+kind: OdhDashboardConfig
+metadata:
+  name: odh-dashboard-config
+  namespace: redhat-ods-applications
+spec:
+  dashboardConfig:
+    agentsCatalog: true

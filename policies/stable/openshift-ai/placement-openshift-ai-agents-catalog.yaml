@@ -1,0 +1,25 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-openshift-ai-agents-catalog
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # Opt-in: requires openshift-ai on, plus this catalog explicitly enabled.
+  # Preview features are not turned on by default.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/openshift-ai'
+              operator: In
+              values:
+                - 'true'
+            - key: 'autoshift.io/openshift-ai-agents-catalog'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

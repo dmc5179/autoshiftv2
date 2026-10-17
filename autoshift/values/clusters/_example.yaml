@@ -274,6 +274,17 @@ clusters:
       openshift-ai-source: redhat-operators
       openshift-ai-source-namespace: openshift-marketplace
       openshift-ai-version: ''
+      # AI hub catalogs. Both are preview features and both are opt-in: a
+      # dashboard flag the product ignores looks identical to a working one in
+      # policy status, so neither defaults on.
+      #   mcp-catalog    Technology Preview, requires OpenShift 4.22 or later.
+      #                  Enables the mcplifecycleoperator component and the
+      #                  dashboard flag together - either alone is broken.
+      #   agents-catalog Developer Preview. The flag name comes from the 3.5
+      #                  release notes rather than a documented procedure;
+      #                  confirm it against your cluster before relying on it.
+      openshift-ai-mcp-catalog: 'false'
+      openshift-ai-agents-catalog: 'false'
 
       # =======================================================================
       # Openshift Ai Maas

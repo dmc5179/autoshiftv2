@@ -53,3 +53,24 @@ policies:
       - name: policy-openshift-ai-dsc
     manifests:
       - path: test/dsc-ready.yaml
+  # MCP catalog: Technology Preview, needs OpenShift 4.22+. The DSC component
+  # and the dashboard flag ship together because either alone is broken - the
+  # component without the flag is invisible, the flag without the component
+  # has a dead Deploy button.
+  - name: policy-openshift-ai-mcp-catalog
+    placement:
+      placementPath: placement-openshift-ai-mcp-catalog.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/mcp-catalog
+  # Agents catalog: Developer Preview, dashboard flag only.
+  - name: policy-openshift-ai-agents-cat
+    placement:
+      placementPath: placement-openshift-ai-agents-catalog.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/agents-catalog

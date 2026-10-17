@@ -1,0 +1,15 @@
+# Exposes the MCP catalog in the dashboard, at AI hub -> MCP servers. Pairs
+# with the mcplifecycleoperator component; the flag alone gives a catalog
+# whose Deploy button does nothing.
+#
+# OdhDashboardConfig is a cluster singleton holding every dashboard setting,
+# so a replacing write would wipe unrelated configuration. musthave merges,
+# which is why this can be its own manifest.
+apiVersion: opendatahub.io/v1alpha
+kind: OdhDashboardConfig
+metadata:
+  name: odh-dashboard-config
+  namespace: redhat-ods-applications
+spec:
+  dashboardConfig:
+    mcpCatalog: true
