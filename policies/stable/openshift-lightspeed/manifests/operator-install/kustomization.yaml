@@ -12,6 +12,11 @@ helmCharts:
     valuesInline:
       name: openshift-lightspeed
       namespace: openshift-lightspeed
+      # OwnNamespace. lightspeed-operator v1.1.5 declares OwnNamespace=True and
+      # AllNamespaces=False, so the chart's default (empty -> AllNamespaces)
+      # produces an OperatorGroup OLM refuses and the CSV never installs.
+      targetNamespaces:
+        - openshift-lightspeed
       remediation: ${REMEDIATION}
       policyNamespace: ${POLICY_NAMESPACE}
       subscription:

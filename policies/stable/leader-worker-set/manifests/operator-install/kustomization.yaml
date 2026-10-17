@@ -12,6 +12,14 @@ helmCharts:
     valuesInline:
       name: leader-worker-set
       namespace: openshift-lws-operator
+      # OwnNamespace. leader-worker-set v1.0.1 declares OwnNamespace=True and
+      # AllNamespaces=False, so the chart's default (empty -> AllNamespaces)
+      # produces an OperatorGroup OLM refuses:
+      #   UnsupportedOperatorGroup: AllNamespaces InstallModeType not supported
+      # The CSV then sits in Failed while the policy reports only that the
+      # ClusterServiceVersion was not found.
+      targetNamespaces:
+        - openshift-lws-operator
       remediation: ${REMEDIATION}
       policyNamespace: ${POLICY_NAMESPACE}
       subscription:
