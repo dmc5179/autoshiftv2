@@ -10,6 +10,9 @@ metadata:
 # renders the shared components/operator-install chart. Add further CRs as new policies[] entries
 # pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
 # Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+# Several policies share placement.yaml.
+placementBindingDefaults:
+  name: binding-policy-openshift-ai
 policyDefaults:
   namespace: ${POLICY_NAMESPACE}
   # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
@@ -35,3 +38,18 @@ policies:
   - name: policy-openshift-ai-operator-install
     manifests:
       - path: manifests/operator-install
+  # DSCInitialization and DataScienceCluster. Depends on the install because
+  # both CRDs arrive with the CSV; a ConfigurationPolicy naming an unknown
+  # kind reports Compliant while doing nothing.
+  - name: policy-openshift-ai-dsc
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-operator-install
+    manifests:
+      - path: manifests/dsc
+  - name: policy-openshift-ai-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: test/dsc-ready.yaml

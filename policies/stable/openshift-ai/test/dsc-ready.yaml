@@ -1,0 +1,12 @@
+# Inform-only: Compliant once the DataScienceCluster finishes reconciling.
+# The DSC reports Ready long before every component is, but a DSC that is NOT
+# Ready is always a real problem and is the first thing to look at when MaaS
+# or a model fails to appear.
+apiVersion: datasciencecluster.opendatahub.io/v2
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+status:
+  conditions:
+    - type: Ready
+      status: 'True'

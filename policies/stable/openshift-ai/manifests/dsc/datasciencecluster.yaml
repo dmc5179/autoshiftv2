@@ -1,0 +1,84 @@
+# The component set. Two things here are load-bearing and non-obvious:
+#
+#   llamastackoperator MUST be Removed. It is deprecated in favour of ogx, and
+#   leaving it Managed - or unset, which defaults to Managed on an existing
+#   DSC - makes the operator reject ogx. That failure aborts the whole
+#   module-provisioning batch at runlevel 32, which in turn prevents aigateway
+#   from installing its CRDs. The symptom is that MaaS never appears, even
+#   though modelsAsAService reads Managed.
+#
+#   aigateway.modelsAsAService is what turns MaaS on. The MaaS platform
+#   policy depends on this having reconciled.
+kind: DataScienceCluster
+apiVersion: datasciencecluster.opendatahub.io/v2
+metadata:
+  name: default-dsc
+  labels:
+    app.kubernetes.io/name: datasciencecluster
+spec:
+  components:
+    # -- AI Pipelines (Kubeflow Pipelines) --
+    aipipelines:
+      managementState: Managed
+    # -- RHOAI Dashboard --
+    dashboard:
+      managementState: Managed
+    # -- Feast Operator (feature store) --
+    feastoperator:
+      managementState: Managed
+    # -- AI Gateway (MaaS modularization, RHOAI 3.5+) --
+    aigateway:
+      managementState: Managed
+      modelsAsAService:
+        managementState: Managed
+    # -- KServe (model serving) --
+    kserve:
+      managementState: Managed
+      nim:
+        managementState: Managed
+      rawDeploymentServiceConfig: Headed
+    # -- Kueue (job queueing) --
+    kueue:
+      defaultClusterQueueName: default
+      defaultLocalQueueName: default
+      managementState: Removed
+    # -- OGX (required for GenAI Studio / Playground) --
+    ogx:
+      managementState: Managed
+    # -- LlamaStack Operator: DEPRECATED, replaced by ogx above. Must be explicitly
+    #    Removed - leaving it Managed (or unset, if the DSC already exists with the
+    #    field defaulted to Managed) makes the operator reject the ogx module with
+    #    "LlamaStackOperator is set to Managed; it has been deprecated, set it to
+    #    Removed before enabling OGX". That failure aborts the entire module-provisioning
+    #    batch at runlevel 32, which also blocks aigateway/mlflowoperator from ever
+    #    installing their CRDs - so maas-api never deploys and MaaSModelRef/etc. CRDs
+    #    never appear, even though modelsAsAService shows Managed. --
+    llamastackoperator:
+      managementState: Removed
+    # -- MLflow Operator --
+    mlflowoperator:
+      managementState: Managed
+    # -- Model Registry --
+    modelregistry:
+      managementState: Managed
+      registriesNamespace: rhoai-model-registries
+    # -- Ray (distributed computing) --
+    ray:
+      managementState: Managed
+    # -- Trainer --
+    trainer:
+      managementState: Removed
+    # -- Training Operator --
+    trainingoperator:
+      managementState: Managed
+    # -- TrustyAI (evaluation) --
+    trustyai:
+      eval:
+        lmeval:
+          permitCodeExecution: deny
+          permitOnline: deny
+      managementState: Managed
+    # -- Workbenches (Jupyter notebooks) --
+    workbenches:
+      managementState: Managed
+      workbenchNamespace: rhods-notebooks
