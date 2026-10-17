@@ -1,0 +1,167 @@
+# ztwim AutoShift Policy
+
+## Overview
+Installs the zero-trust-workload-identity-manager operator using AutoShift's ACM **PolicyGenerator** pattern. The
+directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
+`manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
+
+## Layout
+```
+ztwim/
+  kustomization.yaml            # entrypoint: generators: [policy-generator-config.yaml]
+  policy-generator-config.yaml  # the PolicyGenerator (policy graph, remediation, eval interval)
+  placement.yaml                # Placement predicate (autoshift.io/ztwim) + tolerations
+  manifests/
+    operator-install/
+      kustomization.yaml        # renders the shared components/operator-install chart (Namespace +
+                                #   OperatorPolicy); per-operator ACM lookups are visible here
+```
+The operator-install renders the shared `components/operator-install` chart — edit the visible ACM
+lookups in `manifests/operator-install/kustomization.yaml` to tune the subscription/version. Add
+further CRs as new `policies[]` entries in `policy-generator-config.yaml` pointing at their own dirs.
+
+## Test Locally
+```bash
+# Render the policy exactly as the CMP/CI does (needs: make install-policy-generator)
+KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
+  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
+  policies/stable/ztwim
+
+# Full validation (helm render + hub/spoke template resolution + label contract)
+cd tools && go test -tags integration -count=1 ./internal/resolver/...
+```
+The `${POLICY_NAMESPACE}`, `${REMEDIATION}`, `${EVAL_COMPLIANT}`, `${EVAL_NONCOMPLIANT}` tokens are
+substituted per-deployment by the repo-server CMP before `kustomize build` runs; leave them as-is.
+
+## Enable on Clusters
+Labels are defined in values files only — never directly on managed clusters. The cluster-labels
+policy propagates them, and this policy's `placement.yaml` selects clusters with
+`autoshift.io/ztwim: 'true'`.
+
+```yaml
+# In autoshift/values/clustersets/hub.yaml (or another clusterset / per-cluster file)
+hubClusterSets:
+  hub:
+    labels:
+      ztwim: 'true'
+      ztwim-subscription-name: 'zero-trust-workload-identity-manager'
+      ztwim-channel: 'stable-v1'
+      ztwim-source: 'redhat-operators'
+      ztwim-source-namespace: 'openshift-marketplace'
+      # ztwim-version: 'zero-trust-workload-identity-manager.v1.x.x'  # Optional: pin to a specific CSV
+```
+`generate-operator-policy.sh --add-to-autoshift` adds these for you (and to `_example*.yaml`, which
+the label-contract CI requires for every consumed `autoshift.io/*` key).
+
+The ApplicationSet auto-discovers new directories under `policies/stable/*` (and `certified`/
+`community`) — no manual registration required.
+
+## Version Control
+- **Automatic upgrades** within the channel by default.
+- **Pin a version** with the `ztwim-version` label — a pinned version sets a manual
+  install plan (`startingCSV` + `versions`), so upgrades become explicit.
+```bash
+# Find available CSV versions
+oc get packagemanifests zero-trust-workload-identity-manager -o jsonpath='{.status.channels[*].currentCSV}'
+```
+
+## Adding Configuration (operator CRs)
+After the operator installs, add its Custom Resources as **bare manifests** — do NOT hand-write a
+ConfigurationPolicy wrapper; PolicyGenerator generates it.
+
+1. Explore the CRDs the operator installed:
+   ```bash
+   oc get pods -n zero-trust-workload-identity-manager
+   oc get crds | grep ztwim
+   oc explain <CustomResourceName>
+   ```
+2. For a **static** CR, drop a bare manifest into `manifests/`:
+   ```yaml
+   # manifests/ztwim-config.yaml
+   apiVersion: <operator apiVersion>
+   kind: <CustomResource>
+   metadata:
+     name: ztwim-config
+     namespace: zero-trust-workload-identity-manager
+   spec:
+     setting: value
+   ```
+3. For a CR that needs **hub templates / loops / conditionals**, use a bare `object-templates-raw`
+   manifest instead (PG still wraps it into one ConfigurationPolicy; `complianceType` lives inside):
+   ```yaml
+   # manifests/ztwim-config.yaml
+   object-templates-raw: |
+     - complianceType: musthave
+       objectDefinition:
+         apiVersion: <operator apiVersion>
+         kind: <CustomResource>
+         metadata:
+           name: ztwim-config
+           namespace: zero-trust-workload-identity-manager
+         spec:
+           setting: '{{hub index .ManagedClusterLabels "autoshift.io/ztwim-setting" | default "default-value" hub}}'
+   ```
+4. If the config must be its **own** Policy (separate remediation, a dependency, or a different
+   predicate), add a `policies[]` entry in `policy-generator-config.yaml` (with `dependencies:` on
+   `policy-ztwim-operator-install`) and point it at the new manifest with its own
+   `placement.placementPath`. `generate-policy.sh --dir policies/stable/ztwim` scaffolds this.
+
+Document any new `autoshift.io/ztwim-*` label in `autoshift/values/clustersets/_example.yaml`
+or the label-contract CI (`go test -tags integration`) fails with `Missing`.
+
+### Readiness / status checks
+A status assertion (e.g. CSV `phase: Succeeded`) can only be observed, so give it its own
+`policies[]` entry with `remediationAction: inform` — never fold an inform check into an enforce
+manifest (ACM's root action would clobber it).
+
+## Reference Examples
+- **Simple operator**: `policies/stable/cert-manager/` — bare Namespace + OperatorPolicy (this shape)
+- **Multiple related policies / placements**: `policies/stable/advanced-cluster-security/`
+- **Multiple config types**: `policies/stable/metallb/`
+- **Storage cluster config**: `policies/stable/openshift-data-foundation/`
+
+## Troubleshooting
+- **Policy not applied**: `oc get managedcluster <cluster> --show-labels`; check the Placement
+  (`oc get placement -n policies-autoshift`) and `oc describe policy policy-ztwim-operator-install`.
+- **Operator install issues**: `oc get subscription,installplan -n zero-trust-workload-identity-manager`;
+  `oc get catalogsource -n openshift-marketplace`.
+- **Render issues**: run the `kustomize build` above; hub templates use bare `{{hub … hub}}`
+  delimiters (no Helm `{{ "{{hub" }}` escaping in PolicyGenerator manifests).
+
+## Resources
+- [Operator Documentation](https://operatorhub.io/operator/zero-trust-workload-identity-manager)
+- [AutoShift Developer Guide](../../../docs/developer-guide.md)
+- [ACM PolicyGenerator](https://github.com/open-cluster-management-io/policy-generator-plugin)
+
+## The install namespace is load-bearing
+
+This policy installs into `zero-trust-workload-identity-manager`, the operator's own suggested
+namespace, and that is deliberate. There is a known issue where the OIDC discovery provider never
+becomes ready if ZTWIM is installed into an `openshift-*` namespace. Changing the namespace here
+without testing that path will produce an operator that installs cleanly and then never works.
+
+Only needed for SPIFFE agent identity / token exchange. Drop it if you are not doing that.
+
+## ⚠️ Install mode is unverified
+
+This policy uses the shared chart's default, an **AllNamespaces** (cluster-scoped) OperatorGroup,
+because no `targetNamespaces` is set. That has not been checked against this operator's CSV.
+
+An operator whose CSV declares `AllNamespaces=false` will sit in `Failed` with
+`UnsupportedOperatorGroup`, and the policy will report only "the ClusterServiceVersion required by
+the policy was not found" — which reads like a catalog problem rather than an OperatorGroup the API
+server refused. The nvidia-gpu-operator policy shipped with exactly this defect
+(auto-shift/autoshiftv2#283).
+
+Before trusting this policy, check:
+
+```bash
+oc get csv <csv> -n <namespace> -o jsonpath='{range .spec.installModes[*]}{.type}={.supported}{"\n"}{end}'
+```
+
+If `AllNamespaces=false`, add to `manifests/operator-install/kustomization.yaml`:
+
+```yaml
+      targetNamespaces:
+        - <namespace>
+```
