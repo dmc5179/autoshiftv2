@@ -20,7 +20,11 @@ hubClusterSets:
             # disagree returns 404 "the model X does not exist" at inference
             # time, long after every policy reports Compliant.
             uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
-            image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9:3.0'
+            # Pinned by digest, not by tag. There is no :3.0 tag on this
+            # repository — the pod fails with `manifest unknown`, which
+            # presents as ImagePullBackOff on the runtime container while the
+            # modelcar pulls fine, so it looks like a model problem.
+            image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9@sha256:5800e12b2a465f15961fcf34b645d79ed4f91ec9161eab22b1205d12682183c8'
             replicas: 1
             gpus: 1
             requestsCpu: '2'
