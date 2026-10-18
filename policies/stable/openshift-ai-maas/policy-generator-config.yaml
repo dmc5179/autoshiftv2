@@ -37,6 +37,32 @@ policies:
       - path: manifests
   # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
   # it never reaches it without MetalLB, so this is where that shows up.
+  # The database maas-api needs, and whether maas-api came up because of it.
+  # Separate from -ready, which is about the Gateway: a programmed Gateway and a
+  # working MaaS control plane are different things, and the gap between them is
+  # exactly where a missing database hides. inform-only; the Secret holds a
+  # password and is created out of band, so no policy supplies it.
+  - name: policy-openshift-ai-maas-db
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-maas
+    manifests:
+      - path: test/maas-db-secret.yaml
+        customMessage:
+          noncompliant: >
+            ❌ The maas-db-config Secret is missing. maas-api reads its PostgreSQL
+            URL from it once at startup and exits without it, so the pod
+            CrashLoopBackOffs and the gateway answers authenticated requests with
+            "no healthy upstream". Create it with scripts/maas-database.sh in the
+            rhoai-mass-quickstart repo, or by hand for an in-cluster database.
+      - path: test/maas-api-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ maas-api is not Available. API key issuance, the model listing and
+            subscription enforcement are down. Inference against an
+            already-issued key may still work, which is why nothing else reports
+            this. Check the Secret above first.
   - name: policy-openshift-ai-maas-ready
     remediationAction: inform
     dependencies:

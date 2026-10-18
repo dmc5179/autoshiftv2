@@ -1,0 +1,24 @@
+# Is the MaaS control plane actually serving?
+#
+# The distinction this draws is the useful one. A model can be Ready and
+# answering inference while maas-api is down — serving and governance are
+# separate paths through the same gateway. When maas-api is down you lose API
+# key issuance, the model listing, and subscription enforcement, while
+# inference against an already-issued key keeps working. Nothing else reports
+# that.
+#
+# Asserted on the Deployment's Available condition rather than on pod counts,
+# so a rollout in progress does not read as a failure.
+object-templates-raw: |
+  {{hub- $ns := (index .ManagedClusterLabels "autoshift.io/openshift-ai-maas-db-namespace" | default "redhat-ai-gateway-infra") hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: maas-api
+        namespace: {{hub $ns hub}}
+      status:
+        conditions:
+          - type: Available
+            status: 'True'

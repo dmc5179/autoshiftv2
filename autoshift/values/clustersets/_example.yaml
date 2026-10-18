@@ -2165,6 +2165,10 @@ hubClusterSets:
       # Openshift Ai Maas
       # =======================================================================
       openshift-ai-maas: 'false'
+      # maas-api's database. The Secret is created out of band — it holds a
+      # password — so these only say where to look for it, never what is in it.
+      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # redhat-ods-applications on RHOAI 3.4
+      openshift-ai-maas-db-secret: maas-db-config
 
       # =======================================================================
       # Openshift Ai Models

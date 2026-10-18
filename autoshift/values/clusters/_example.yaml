@@ -92,6 +92,8 @@ clusters:
       # GPU Node Sizing
       # =======================================================================
       model-egress: 'false'
+      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
+      openshift-ai-maas-db-secret: maas-db-config
       gpu-nodes: '1'
       gpu-nodes-provider: aws
       gpu-nodes-instance-type: 'g6.xlarge'
