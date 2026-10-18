@@ -1,10 +1,17 @@
-# Inform-only: Compliant once the Leader Worker Set controller is actually
-# serving. The OperatorPolicy reports on the Subscription and CSV; this
-# reports on the workload, which is what callers depend on.
+# Is the LeaderWorkerSet controller actually running?
+#
+# Asserted on the operator's own Deployment, which is named after the namespace
+# (openshift-lws-operator), not on a controller-manager name. An earlier version
+# of this file asserted lws-controller-manager, which does not exist on this
+# operator at any point — so the check could only ever fail, and said
+# "deployments [lws-controller-manager] not found" rather than anything about
+# the real state.
+#
+# inform-only: a status can only be observed.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: lws-controller-manager
+  name: openshift-lws-operator
   namespace: openshift-lws-operator
 status:
   conditions:

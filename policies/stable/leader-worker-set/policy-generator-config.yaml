@@ -41,9 +41,19 @@ policies:
       - path: manifests/operator-install
   # inform: surfaces the controller not running, which an OperatorPolicy
   # reporting only on the Subscription and CSV would not catch.
+  # The controller CR. The operator installs and then idles until this exists,
+  # so without it a LeaderWorkerSet workload can never be scheduled while every
+  # policy reports Compliant. Depends on the install because a
+  # ConfigurationPolicy naming a CRD that does not exist yet reports Compliant
+  # while doing nothing.
+  - name: policy-lws-instance
+    dependencies:
+      - name: policy-lws-operator-install
+    manifests:
+      - path: manifests/lws-instance
   - name: policy-lws-ready
     remediationAction: inform
     dependencies:
-      - name: policy-lws-operator-install
+      - name: policy-lws-instance
     manifests:
       - path: test/lws-ready.yaml
