@@ -11,8 +11,9 @@ metadata:
 # config.modelEgress in the cluster's rendered-config rather than from labels: an
 # egress rule is a structured record, and a label is a string.
 #
-# Several policies share placement.yaml, so the shared PlacementBinding needs an
-# explicit name.
+# One policy today, but placementBindingDefaults is set now rather than later:
+# the deferred egress layers all bind to this same placement, and PolicyGenerator
+# refuses to render the moment a second policy shares it without an explicit name.
 placementBindingDefaults:
   name: binding-policy-model-egress
 policyDefaults:
@@ -33,43 +34,6 @@ policyDefaults:
   placement:
     placementPath: placement.yaml
 policies:
-  # Cluster-scoped floor first. It is namespace-independent, so it still applies if
-  # a zone's namespace does not exist yet, and it is the rule that matters most:
-  # denying the cloud metadata endpoint closes the path from prompt injection to
-  # the node's instance credentials.
   - name: policy-model-egress-baseline
     manifests:
       - path: manifests/baseline
-  # L3/L4, inside and outside the cluster. Deliberately NOT dependent on
-  # openshift-ai-models: if the namespace is missing this should report
-  # NonCompliant, which is visible, rather than Pending, which reads as fine in
-  # any check that looks for NonCompliant.
-  - name: policy-model-egress-netpol
-    dependencies:
-      - name: policy-model-egress-baseline
-    manifests:
-      - path: manifests/netpol
-  # FQDN layer, which NetworkPolicy cannot express.
-  - name: policy-model-egress-firewall
-    dependencies:
-      - name: policy-model-egress-netpol
-    manifests:
-      - path: manifests/firewall
-  - name: policy-model-egress-audit
-    dependencies:
-      - name: policy-model-egress-firewall
-    manifests:
-      - path: manifests/audit
-  - name: policy-model-egress-ready
-    remediationAction: inform
-    consolidateManifests: false
-    dependencies:
-      - name: policy-model-egress-audit
-    manifests:
-      - path: test/egress-firewall-applied.yaml
-        customMessage:
-          noncompliant: >
-            ❌ An egress firewall is not programmed for a configured zone. Check the
-            namespace exists, that the cluster is OVN-Kubernetes, and that nothing
-            created a second EgressFirewall by hand — OVN serves exactly one per
-            namespace and the CRD pins its name to "default".

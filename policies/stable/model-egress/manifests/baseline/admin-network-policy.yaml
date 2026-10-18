@@ -1,21 +1,45 @@
-# Cluster-wide floor for every namespace labelled as an AI workload.
+# Deny the cloud metadata endpoint to model and agent namespaces.
 #
-# The deny rule is listed first deliberately: AdminNetworkPolicy evaluates rules in
+# This is the highest-value egress rule for the least operational risk, which is
+# why it ships on its own ahead of the rest. A model that can reach
+# 169.254.169.254 can read the node's instance credentials — on AWS that is a
+# direct path from prompt injection to the cloud account. Denying one link-local
+# address breaks nothing else: no legitimate workload in a model namespace has
+# any reason to call it.
+#
+# Deliberately narrow. A default-deny egress posture with an allowlist, an
+# EgressFirewall for FQDN rules, and ACL audit logging are all worthwhile and all
+# able to take a working cluster down if a rule is wrong. They are tracked
+# separately rather than bundled in here.
+#
+# The deny rule is listed first on purpose: AdminNetworkPolicy evaluates rules in
 # order within a policy, and a lower priority value wins between policies.
 #
-# Blocking the cloud metadata endpoint is the single highest-value rule here. A
-# model or agent that can reach 169.254.169.254 can read the node's instance
-# credentials, which on AWS is a path from prompt injection to the cloud account.
-# Nothing else in this policy set is as cheap or as load-bearing.
+# DNS is explicitly allowed alongside. An AdminNetworkPolicy with only a Deny
+# rule leaves other traffic to the cluster default (allow), so the DNS rule is
+# not strictly required today — it is here so that adding a later default-deny
+# layer cannot silently break name resolution, which presents as a broken model
+# rather than as a network problem.
 #
-# v1alpha1 is the only version OpenShift 4.22 serves for this kind. ANP has no FQDN
-# peer — that is what manifests/firewall/ exists for.
+# v1alpha1 is the only version OpenShift 4.22 serves for this kind. ANP has no
+# FQDN peer; hostname rules need EgressFirewall, which is part of the deferred
+# work.
 object-templates-raw: |
   {{hub- $policyNs := .PolicyMetadata.namespace hub}}
   {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
   {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
   {{hub- $base := (dig "baseline" (dict) $cfg) hub}}
   {{hub- if (dig "enabled" false $base) hub}}
+  {{hub- range $ns := (dig "namespaces" (list) $cfg) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{hub $ns hub}}
+        labels:
+          autoshift.io/ai-workload: 'true'
+  {{hub- end hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: policy.networking.k8s.io/v1alpha1
@@ -23,14 +47,15 @@ object-templates-raw: |
       metadata:
         name: ai-workload-egress-baseline
       spec:
-        # From typed YAML config, so this is already an int. Never source a numeric
-        # field from a ManagedCluster label: toInt on a quoted hub-resolved value
-        # fails resolution outright, and surfaces only as a policy that applies
-        # nothing while reporting Compliant.
+        # From typed YAML config, so this is already an int. Never source a
+        # numeric field from a ManagedCluster label: toInt on a quoted
+        # hub-resolved value fails resolution outright, and surfaces only as a
+        # policy that applies nothing while reporting Compliant.
         priority: {{hub (dig "priority" 50 $base) hub}}
         subject:
           namespaces:
-            matchLabels: {{hub (dig "subjectLabels" (dict "autoshift.io/ai-workload" "true") $base) | toJson hub}}
+            matchLabels:
+              autoshift.io/ai-workload: 'true'
         egress:
           - name: deny-cloud-metadata
             action: Deny

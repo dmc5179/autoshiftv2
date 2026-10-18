@@ -51,48 +51,26 @@ hubClusterSets:
   hub:  # ← CHANGE 2: replace with your clusterset name
     config:
       # =======================================================================
-      # model-egress — which namespaces are fenced, and what each may reach
+      # model-egress — deny the cloud metadata endpoint to model namespaces
       # =======================================================================
-      # DATA; the ENABLE flag is the model-egress label below. An egress rule is
-      # a structured record, not a string, so it cannot live in a label.
+      # DATA; the ENABLE flag is the model-egress label below.
       #
-      # Scope zones to model, agent and notebook namespaces. Do NOT fence
-      # models-as-a-service or redhat-ai-gateway-infra — maas-api, Limitador and
-      # Authorino make outbound calls, and breaking them presents as a 403 or 504
-      # at the gateway rather than as anything network-shaped.
+      # Deliberately narrow for now: one AdminNetworkPolicy denying
+      # 169.254.169.254 to every listed namespace, plus an explicit DNS allow.
+      # Default-deny egress, FQDN allowlisting via EgressFirewall, and ACL audit
+      # logging are tracked separately — each is valuable and each can take a
+      # working cluster down if a rule is wrong.
       modelEgress:
         baseline:
           enabled: true
           priority: 50
-          subjectLabels:
-            autoshift.io/ai-workload: 'true'
-        zones:
-          - namespace: 'llm'
-            podSelector: {}
-            aclLogging:
-              deny: 'alert'
-            # NetworkPolicy egress rules, verbatim. DNS is always emitted by the
-            # policy and must not be repeated here.
-            allow:
-              - to:
-                  - namespaceSelector:
-                      matchLabels:
-                        kubernetes.io/metadata.name: models-as-a-service
-                ports:
-                  - protocol: TCP
-                    port: 8000
-            # EgressFirewall rules, verbatim, in order. Exactly one of
-            # cidrSelector, dnsName or nodeSelector per rule — the CRD enforces
-            # maxProperties: 1. A terminal Deny 0.0.0.0/0 is appended by the
-            # policy; do not repeat it, and note that without it an allowlist
-            # does nothing at all.
-            egressFirewall:
-              - type: Allow
-                to:
-                  dnsName: registry.redhat.io
-                ports:
-                  - protocol: TCP
-                    port: 443
+        # Namespaces to fence. Each is labelled autoshift.io/ai-workload, which is
+        # what the AdminNetworkPolicy selects on. Do NOT list
+        # models-as-a-service or redhat-ai-gateway-infra: maas-api, Limitador and
+        # Authorino make outbound calls, and breaking them presents as a 403 or
+        # 504 at the gateway rather than as anything network-shaped.
+        namespaces:
+          - 'llm'
       # =======================================================================
       # openshift-ai-models — which models this cluster serves (DATA; the ENABLE flag is the
       # openshift-ai-models label below). A model is a structured record, not a string, so it

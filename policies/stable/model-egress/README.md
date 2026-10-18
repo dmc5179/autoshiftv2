@@ -1,26 +1,24 @@
 # model-egress
 
-Default-deny **outbound** network policy for the namespaces that run models and
-agents, with an FQDN allowlist, a cluster-wide floor, and audit logging of what
-gets blocked.
+Denies the cloud metadata endpoint to the namespaces that run models and agents.
 
 Everything else in the RHOAI stack controls **ingress** — who may call a model
 (`MaaSAuthPolicy`), and how fast (`MaaSSubscription`, Kuadrant rate limits). This
 is the other direction: what the model itself may reach.
 
-Off by default. It is the policy here most capable of taking a working cluster
-down.
+Off by default.
 
-## Why a CIDR is not enough
+## Why this rule first
 
-The motivating case: a model needs to reach a CDN whose range is `104.16.0.0/12`.
-A `NetworkPolicy` `ipBlock` for that range permits every tenant of that CDN —
-including one an attacker rented this morning. `NetworkPolicy` cannot express a
-hostname; `EgressFirewall` can. That is why both are here and neither replaces the
-other.
+A model that can reach `169.254.169.254` can read the node's instance
+credentials. On AWS that is a direct path from prompt injection to the cloud
+account — the model is talked into fetching a URL, and the attacker has a
+credential.
 
-They also cover different traffic. `EgressFirewall` governs only packets leaving
-the cluster, so lateral pod-to-pod movement still needs `NetworkPolicy`.
+It is also the cheapest rule to turn on. No legitimate workload in a model
+namespace has any reason to call the metadata service, so denying one link-local
+address breaks nothing. That combination — high value, near-zero blast radius —
+is why it ships alone rather than as part of a broader egress posture.
 
 ## Configuration
 
@@ -30,80 +28,65 @@ config:
     baseline:
       enabled: true
       priority: 50
-      subjectLabels:
-        autoshift.io/ai-workload: 'true'
-    zones:
-      - namespace: 'llm'
-        podSelector: {}
-        aclLogging:
-          deny: 'alert'
-        allow:                      # NetworkPolicy egress rules, verbatim
-          - to:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: models-as-a-service
-            ports:
-              - protocol: TCP
-                port: 8000
-        egressFirewall:             # EgressFirewall rules, verbatim, in order
-          - type: Allow
-            to:
-              dnsName: cdn.example.com
-            ports:
-              - protocol: TCP
-                port: 443
+    namespaces:
+      - 'llm'
 ```
 
 Enable with `autoshift.io/model-egress: 'true'`.
 
-## Four layers
+Each listed namespace is labelled `autoshift.io/ai-workload`, which is what the
+`AdminNetworkPolicy` selects on.
 
-| Policy | Mode | Does |
-|--------|------|------|
-| `policy-model-egress-baseline` | enforce | `AdminNetworkPolicy`: deny cloud metadata, allow cluster DNS, for every namespace labelled `autoshift.io/ai-workload` |
-| `policy-model-egress-netpol` | enforce | Per zone: default-deny egress + an allowlist |
-| `policy-model-egress-firewall` | enforce | Per zone: `EgressFirewall` with FQDN rules and a terminal deny |
-| `policy-model-egress-audit` | enforce | Per zone: OVN ACL logging annotation and the workload label |
-| `policy-model-egress-ready` | inform | OVN actually programmed the rules |
+**Do not list `models-as-a-service` or `redhat-ai-gateway-infra`.** maas-api,
+Limitador and Authorino all make outbound calls, and breaking them surfaces as a
+403 or 504 at the gateway rather than as anything network-shaped.
 
-The **baseline** is the highest-value rule for the least risk. A model that can
-reach `169.254.169.254` can read the node's instance credentials, which on AWS is
-a direct path from prompt injection to the cloud account.
+## What it creates
 
-## Things that will catch you
+| | |
+|---|---|
+| `policy-model-egress-baseline` | One cluster-scoped `AdminNetworkPolicy` denying `169.254.169.254/32` and `fd00:ec2::254/128`, plus an explicit cluster-DNS allow |
 
-**A terminal deny is mandatory, and the policy adds it.** With no `EgressFirewall`
-present the default is Allow, and rules are evaluated in order — so an allowlist
-with no trailing `Deny 0.0.0.0/0` permits everything while looking restrictive.
-Do not add one in config; it is appended.
+DNS is allowed even though an `AdminNetworkPolicy` with only a `Deny` rule leaves
+other traffic to the cluster default. It is there so that adding a default-deny
+layer later cannot silently break name resolution — a failure that presents as a
+broken model, not as a network problem.
 
-**DNS is always allowed and is not configurable.** A default-deny egress policy
-without it gives a model that times out on every name lookup, and whoever debugs
-that will be looking at the model, not at a network policy.
+`v1alpha1` is the only version OpenShift 4.22 serves for this kind.
 
-**Do not fence the MaaS namespaces.** `models-as-a-service` and
-`redhat-ai-gateway-infra` run maas-api, Limitador and Authorino, all of which make
-outbound calls. Breaking them surfaces as a 403 or 504 at the gateway.
+## Not covered yet
 
-**One `EgressFirewall` per namespace, named `default`.** The CRD pins
-`metadata.name` to `^default$`, and each rule's `to` has `maxProperties: 1` — one
-of `cidrSelector`, `dnsName` or `nodeSelector`, never two.
+Deliberately out of scope here. Each is worthwhile, and each can take a working
+cluster down if a rule is wrong, so they are tracked and staged separately rather
+than bundled in:
 
-**DNS name resolution is TTL-polled**, with a 30-minute floor. A fast-rotating CDN
-can produce both stale allows and spurious denies.
+- **Default-deny egress with an allowlist** (`NetworkPolicy`). The real lockdown,
+  and the real risk.
+- **FQDN allowlisting** (`EgressFirewall`). The reason a CIDR is not enough: an
+  `ipBlock` for a CDN range permits every tenant of that CDN, including one an
+  attacker rented this morning. Only `EgressFirewall` matches a hostname. Note it
+  governs only traffic leaving the cluster, so it does not replace
+  `NetworkPolicy` — they cover different halves.
+- **ACL audit logging** (`k8s.ovn.org/acl-logging`), so a blocked attempt is a log
+  line rather than a silence.
+- **A readiness assertion** that OVN actually programmed the rules. An
+  `EgressFirewall` object can exist unenforced, and the policy that created it
+  still reports Compliant.
 
-## What this does not close
+Two things that will matter when that work lands, learned while prototyping it:
 
-**DNS exfiltration.** Allowing port 5353 to `openshift-dns` still lets data encoded
-in subdomain labels reach CoreDNS, which forwards it upstream. The `EgressFirewall`
-deny does not help, because that resolution leaves via the node rather than the
-pod. Closing it needs CoreDNS forward-policy work, which is out of scope here.
+- A terminal `Deny 0.0.0.0/0` is **mandatory**. With no `EgressFirewall` present
+  the default is Allow and rules evaluate in order, so an allowlist without one
+  permits everything while looking restrictive.
+- One `EgressFirewall` per namespace, named `default` — the CRD pins
+  `metadata.name` to `^default$`, and each rule's `to` has `maxProperties: 1`.
 
-**OCI modelcar pulls are unaffected**, which is intended — the kubelet pulls them on
-the node network, outside pod egress policy. A model using an `s3://` or `https://`
-`uri:` instead goes through a storage initializer *inside* the pod and **will** be
-blocked unless allowed.
+## What this cannot close
+
+**DNS exfiltration.** Data encoded in subdomain labels still reaches CoreDNS,
+which forwards it upstream. That resolution leaves via the node, so no pod-level
+egress rule sees it. Closing it needs CoreDNS forward-policy work.
 
 **Content, as opposed to connections.** NeMo Guardrails filters the inference
-request path; it cannot see an outbound call an agent process makes. It lowers the
-chance something asks to call out. This policy is what stops the call.
+request path; it cannot see an outbound call an agent process makes. It lowers
+the chance something asks to call out. Network policy is what stops the call.
