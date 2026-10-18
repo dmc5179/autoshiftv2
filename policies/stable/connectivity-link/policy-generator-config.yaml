@@ -56,16 +56,10 @@ policies:
       - name: policy-rhcl-kuadrant
     manifests:
       - path: test/kuadrant-ready.yaml
-  # Authorino listener TLS, in three steps because the pieces are circular.
-  # Authorino will not start without the certificate; the certificate is
-  # issued by service-ca in response to an annotation on the Authorino
-  # Service; and that Service does not exist until Authorino starts. So the
-  # CR ships with TLS off, the Service is annotated once it exists, and TLS
-  # is enabled only after the Secret has appeared.
-  #
-  # Doing all three in one policy would not be safe: a ConfigurationPolicy
-  # gives no ordering between the objects it applies, so TLS could be enabled
-  # in the same pass that requests the certificate.
+  # Ask service-ca for the Authorino serving certificate. Enabling TLS is NOT
+  # done here: manifests/kuadrant/authorino.yaml drives listener.tls from a
+  # lookup of the Secret, so the sequence resolves itself and only one policy
+  # ever owns that field. Two enforcing policies writing it would fight.
   - name: policy-rhcl-authorino-cert
     dependencies:
       - name: policy-rhcl-ready
@@ -77,8 +71,3 @@ policies:
       - name: policy-rhcl-authorino-cert
     manifests:
       - path: test/authorino-cert-ready.yaml
-  - name: policy-rhcl-authorino-tls
-    dependencies:
-      - name: policy-rhcl-authorino-cert-ready
-    manifests:
-      - path: manifests/authorino-tls
