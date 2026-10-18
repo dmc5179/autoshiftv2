@@ -1,0 +1,43 @@
+# FQDN egress allowlist. This is the layer that answers the question a CIDR cannot:
+# a NetworkPolicy ipBlock for a CDN range permits every tenant of that CDN,
+# including one an attacker rented this morning. EgressFirewall matches on the
+# name.
+#
+# Three constraints come straight from the CRD and are not negotiable. Verified
+# against OpenShift 4.22:
+#   metadata.name is pinned to ^default$  — one EgressFirewall per namespace
+#   spec.egress[].to has maxProperties: 1 — exactly one of cidrSelector, dnsName
+#                                           or nodeSelector per rule
+#   spec.egress[] requires both `to` and `type`
+#
+# EgressFirewall governs only traffic leaving the cluster. It does nothing about
+# pod-to-pod or pod-to-Service traffic, so the NetworkPolicy alongside it is not
+# redundant — the two cover different halves and neither substitutes for the other.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- range $z := (dig "zones" (list) $cfg) hub}}
+  {{hub- $rules := (dig "egressFirewall" (list) $z) hub}}
+  {{hub- if $rules hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: k8s.ovn.org/v1
+      kind: EgressFirewall
+      metadata:
+        name: default
+        namespace: {{hub (dig "namespace" "" $z) hub}}
+      spec:
+        egress:
+          {{hub- range $r := $rules hub}}
+          - {{hub $r | toJson hub}}
+          {{hub- end hub}}
+          # Terminal deny, appended rather than configured. Rules are evaluated in
+          # order, and with no EgressFirewall present the default is Allow — so
+          # without this line the allowlist above changes nothing whatsoever, and
+          # reports Compliant while doing it. Do not repeat it in config.
+          - type: Deny
+            to:
+              cidrSelector: 0.0.0.0/0
+  {{hub- end hub}}
+  {{hub- end hub}}

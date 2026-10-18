@@ -1,0 +1,30 @@
+# OVN ACL audit logging, so a blocked egress attempt is a log line rather than a
+# silence. This is the detection half of the control: an injected prompt that tries
+# to call out shows up here even though the call never completed. Without it the
+# only evidence is an absence.
+#
+# musthave naming only the annotation and the one label: the Namespace itself is
+# created and owned by openshift-ai-models, or by the tenant. musthave merges the
+# fields it lists and leaves the rest alone, so this patches two keys rather than
+# contesting ownership of the object. Widening it to the whole Namespace spec would
+# make two enforcing policies fight over one object on every evaluation, which is
+# the failure mode that produced the Authorino TLS deadlock.
+#
+# The label is what the AdminNetworkPolicy in manifests/baseline/ selects on, so a
+# zone gets the cluster-wide floor by virtue of being a zone.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- range $z := (dig "zones" (list) $cfg) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{hub (dig "namespace" "" $z) hub}}
+        annotations:
+          k8s.ovn.org/acl-logging: {{hub (dig "aclLogging" (dict "deny" "alert") $z) | toJson | quote hub}}
+        labels:
+          autoshift.io/ai-workload: 'true'
+  {{hub- end hub}}

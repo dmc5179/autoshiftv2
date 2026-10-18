@@ -91,6 +91,7 @@ clusters:
       # =======================================================================
       # GPU Node Sizing
       # =======================================================================
+      model-egress: 'false'
       gpu-nodes: '1'
       gpu-nodes-provider: aws
       gpu-nodes-instance-type: 'g6.xlarge'

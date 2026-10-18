@@ -1,0 +1,59 @@
+# Default-deny egress plus an explicit allowlist, per configured zone.
+#
+# Config-driven rather than a fixed list: which namespaces are fenced, and what each
+# may reach, is a property of the cluster's tenants. The list lives in the cluster's
+# rendered-config under config.modelEgress, so adding a zone is a values change.
+#
+# DNS is emitted unconditionally and is not configurable. A default-deny egress
+# policy without a DNS allow gives a model that times out on every name lookup,
+# which presents as a broken model rather than as a network policy problem — and
+# the person debugging it will be looking at the model, not at this file.
+#
+# Scope zones to model, agent and notebook namespaces. Do NOT fence
+# models-as-a-service or redhat-ai-gateway-infra: maas-api, Limitador and Authorino
+# all make outbound calls, and breaking them surfaces as a 403 or 504 at the
+# gateway rather than as anything network-shaped.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- range $z := (dig "zones" (list) $cfg) hub}}
+  {{hub- $ns := (dig "namespace" "" $z) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: default-deny-egress
+        namespace: {{hub $ns hub}}
+      spec:
+        podSelector: {}
+        policyTypes:
+          - Egress
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-model-egress
+        namespace: {{hub $ns hub}}
+      spec:
+        # toJson, not toYaml | nindent: PolicyGenerator re-indents this block after
+        # the template writes it, and an absolute indent does not survive that.
+        podSelector: {{hub (dig "podSelector" (dict) $z) | toJson hub}}
+        policyTypes:
+          - Egress
+        egress:
+          - to:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: openshift-dns
+            ports:
+              - protocol: UDP
+                port: 5353
+              - protocol: TCP
+                port: 5353
+          {{hub- range $r := (dig "allow" (list) $z) hub}}
+          - {{hub $r | toJson hub}}
+          {{hub- end hub}}
+  {{hub- end hub}}

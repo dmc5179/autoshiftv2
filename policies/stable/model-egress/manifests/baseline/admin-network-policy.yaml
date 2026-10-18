@@ -1,0 +1,54 @@
+# Cluster-wide floor for every namespace labelled as an AI workload.
+#
+# The deny rule is listed first deliberately: AdminNetworkPolicy evaluates rules in
+# order within a policy, and a lower priority value wins between policies.
+#
+# Blocking the cloud metadata endpoint is the single highest-value rule here. A
+# model or agent that can reach 169.254.169.254 can read the node's instance
+# credentials, which on AWS is a path from prompt injection to the cloud account.
+# Nothing else in this policy set is as cheap or as load-bearing.
+#
+# v1alpha1 is the only version OpenShift 4.22 serves for this kind. ANP has no FQDN
+# peer — that is what manifests/firewall/ exists for.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $base := (dig "baseline" (dict) $cfg) hub}}
+  {{hub- if (dig "enabled" false $base) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy.networking.k8s.io/v1alpha1
+      kind: AdminNetworkPolicy
+      metadata:
+        name: ai-workload-egress-baseline
+      spec:
+        # From typed YAML config, so this is already an int. Never source a numeric
+        # field from a ManagedCluster label: toInt on a quoted hub-resolved value
+        # fails resolution outright, and surfaces only as a policy that applies
+        # nothing while reporting Compliant.
+        priority: {{hub (dig "priority" 50 $base) hub}}
+        subject:
+          namespaces:
+            matchLabels: {{hub (dig "subjectLabels" (dict "autoshift.io/ai-workload" "true") $base) | toJson hub}}
+        egress:
+          - name: deny-cloud-metadata
+            action: Deny
+            to:
+              - networks:
+                  - 169.254.169.254/32
+                  - fd00:ec2::254/128
+          - name: allow-cluster-dns
+            action: Allow
+            to:
+              - namespaces:
+                  matchLabels:
+                    kubernetes.io/metadata.name: openshift-dns
+            ports:
+              - portNumber:
+                  protocol: UDP
+                  port: 5353
+              - portNumber:
+                  protocol: TCP
+                  port: 5353
+  {{hub- end hub}}
