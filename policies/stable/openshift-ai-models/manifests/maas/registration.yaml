@@ -62,7 +62,7 @@ object-templates-raw: |
           - name: {{hub $name hub}}
             namespace: {{hub $ns hub}}
             tokenRateLimits:
-              - limit: {{hub (dig "tokenRateLimit" 100 $m) hub}}
+              - limit: {{hub (dig "tokenRateLimit" 50000 $m) hub}}
                 window: {{hub (dig "tokenRateWindow" "1m" $m) | quote hub}}
         priority: {{hub (dig "priority" 10 $m) hub}}
   {{hub- end hub}}

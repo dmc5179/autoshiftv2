@@ -103,7 +103,13 @@ hubClusterSets:
             limitsCpu: '4'
             limitsMemory: '24Gi'
             # Free tier applied to accessGroup (default system:authenticated).
-            tokenRateLimit: 100
+            # 50000/1m. The previous 100/1m was unusable for anything but a
+            # chat probe: an agent framework front-loads tool definitions,
+            # skills and memory on every turn, so one trivial prompt measured
+            # 14,208 tokens - 142x the window. First call succeeded on burst
+            # and everything after it 429'd, which reads as a broken
+            # integration rather than a quota.
+            tokenRateLimit: 50000
             tokenRateWindow: '1m'
             # Tool calling. Off unless a parser is named, and the parser is
             # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,

@@ -31,7 +31,7 @@ hubClusterSets:
             requestsMemory: '8Gi'
             limitsCpu: '4'
             limitsMemory: '24Gi'
-            tokenRateLimit: 100
+            tokenRateLimit: 50000
             tokenRateWindow: '1m'
             # Tool calling. Off unless a parser is named, and the parser is
             # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
