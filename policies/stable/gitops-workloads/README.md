@@ -134,5 +134,14 @@ in the other repository.
   the cluster, not a policy bug, but it means **a workload with a manual
   credential prerequisite is not fully push-button** and should say so in its
   own documentation.
+
+  For MaaS specifically this is avoidable, and a workload deployed by this
+  policy should avoid it. `maas-api` accepts a **projected ServiceAccount
+  token** — mint, list, inference and revoke all verified against a
+  ServiceAccount carrying no RBAC at all — so a pod can mint its own
+  `sk-oai-` key at startup and re-mint on restart. That removes the human
+  prerequisite and the key-rotation chore together. One trap: the projection
+  must leave `audience` unset, because a token with an explicit audience is
+  rejected `401`.
 - **Repo credentials.** A private `repoUrl` needs its repository registered with
   ArgoCD first.
