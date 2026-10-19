@@ -1,0 +1,52 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: gitops-workloads
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml - never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber. The manifests read the policy
+# namespace from .PolicyMetadata.namespace instead.
+#
+# Which workloads a cluster runs comes from config.gitopsWorkloads rather than from labels: an
+# Application is a structured record with a repo, a revision and a path, and a label is a string.
+#
+# Two policies sharing one placement, so placementBindingDefaults.name is required - without it
+# rendering fails the moment the second policy is added.
+placementBindingDefaults:
+  name: binding-policy-gitops-workloads
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Explicit, and load-bearing here rather than boilerplate. An ArgoCD Application that owns a
+  # Namespace and carries the resources finalizer cascades on delete - namespace, PVCs, and any
+  # state the workload had. Because these Applications are GENERATED from a list, removing an
+  # entry from a values file would otherwise be enough to destroy a tenant's data. None means
+  # removal stops reconciliation and leaves the Application running, so deleting a workload is a
+  # deliberate manual act.
+  pruneObjectBehavior: None
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-gitops-workloads
+    manifests:
+      - path: manifests/applications
+  # Separate policy, not a manifest in the one above: a root remediationAction overrides its
+  # children, so an inform-only assertion cannot be bundled inside an enforcing policy.
+  - name: policy-gitops-workloads-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-gitops-workloads
+    manifests:
+      - path: test/applications-healthy.yaml

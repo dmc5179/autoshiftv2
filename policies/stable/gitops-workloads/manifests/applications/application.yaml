@@ -1,0 +1,91 @@
+# Deploy a workload that lives in its own repository, without vendoring it here.
+#
+# AutoShift policies configure the platform. A tenant workload - an application with its own repo,
+# its own release cadence and its own team - is a different thing, and copying its manifests into
+# policies/ makes this repository a monorepo for software that has nothing to do with it. This
+# policy creates the ArgoCD Application instead, so the content stays where its owners work and
+# AutoShift decides only whether a cluster gets it.
+#
+# The marginal cost of the next workload is a few lines in a values file rather than a directory
+# here. That is the whole point.
+#
+# mustonlyhave, deliberately. spec.syncPolicy.syncOptions, spec.ignoreDifferences and the helm
+# value lists are object LISTS, and musthave merges into a list rather than replacing it - changing
+# a targetRevision under musthave would leave both revisions in place while the policy reported
+# Compliant. See docs/policy-behavior.md. The consequence to understand: AutoShift fully owns these
+# Applications. Edit the values file, not the Application; a hand-edit is reverted.
+#
+# Every entry is guarded on the four fields with no sensible default. An unguarded entry does not
+# skip - musthave with enforce creates a partly populated Application pointing nowhere.
+#
+# DATA SAFETY. An ArgoCD Application that owns a Namespace and carries
+# resources-finalizer.argocd.argoproj.io cascades on delete: namespace, then PVCs, then whatever
+# the workload had stored. For a GENERATED Application that is sharper than for a hand-made one,
+# because a values-file edit is enough to stop an entry being emitted. Two things make that safe
+# and both matter:
+#   - pruneObjectBehavior: None on this policy (set in policy-generator-config.yaml), so removing
+#     a workload from the list stops reconciling it and does NOT delete the Application. Removal
+#     is therefore deliberate and manual, which is the right way round for something holding state.
+#   - renaming an entry creates a second Application rather than renaming the first. The old one
+#     keeps running. Tidy it by hand.
+# A workload with a PVC it cares about should also carry
+# argocd.argoproj.io/sync-options: Prune=false on that PVC in its own repo. This policy cannot do
+# that for it - the annotation belongs on the resource, which lives in the other repository.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "gitopsWorkloads" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $gitopsNs := (dig "gitopsNamespace" "openshift-gitops" $cfg) hub}}
+  {{hub- range $w := (dig "workloads" (list) $cfg) hub}}
+  {{hub- $name := (dig "name" "" $w) hub}}
+  {{hub- $repo := (dig "repoUrl" "" $w) hub}}
+  {{hub- $path := (dig "path" "" $w) hub}}
+  {{hub- $destNs := (dig "destinationNamespace" "" $w) hub}}
+  {{hub- if and $name $repo $path $destNs hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub (dig "gitopsNamespace" $gitopsNs $w) hub}}
+      spec:
+        project: {{hub (dig "project" "default" $w) hub}}
+        source:
+          repoURL: {{hub $repo hub}}
+          # No default worth trusting. 'main' is wrong often enough to be dangerous - a workload
+          # may keep its deployment tree on a separate branch, and a missing path fails with
+          # "app path does not exist" long after the policy reports Compliant.
+          targetRevision: {{hub (dig "targetRevision" "main" $w) hub}}
+          path: {{hub $path hub}}
+          {{hub- $helm := (dig "helm" (dict) $w) hub}}
+          {{hub- if $helm hub}}
+          # toJson for nested structures, never toYaml | nindent: PolicyGenerator re-indents this
+          # block after the template writes it, and an absolute indent does not survive that.
+          helm: {{hub $helm | toJson hub}}
+          {{hub- end hub}}
+        destination:
+          server: {{hub (dig "destinationServer" "https://kubernetes.default.svc" $w) hub}}
+          namespace: {{hub $destNs hub}}
+        {{hub- $ignore := (dig "ignoreDifferences" (list) $w) hub}}
+        {{hub- if $ignore hub}}
+        ignoreDifferences: {{hub $ignore | toJson hub}}
+        {{hub- end hub}}
+        syncPolicy:
+          automated:
+            # prune defaults false to match the rest of AutoShift: a policy that can delete a
+            # tenant's resources because a path moved is not a safe default. Workloads that keep
+            # their Namespace in-repo generally want it true, so it is per-entry.
+            prune: {{hub (dig "prune" false $w) hub}}
+            selfHeal: {{hub (dig "selfHeal" true $w) hub}}
+          # CreateNamespace is emitted explicitly either way rather than only when true. A workload
+          # whose repo carries its own Namespace manifest needs false - otherwise Argo and the
+          # overlay are two writers for one object - and "absent" is too easy to read as "default
+          # true" by whoever edits the values file next.
+          syncOptions: {{hub (concat (list (printf "CreateNamespace=%v" (dig "createNamespace" true $w))) (dig "syncOptions" (list) $w)) | toJson hub}}
+          {{hub- $retry := (dig "retry" (dict) $w) hub}}
+          {{hub- if $retry hub}}
+          retry: {{hub $retry | toJson hub}}
+          {{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- end hub}}

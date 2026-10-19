@@ -60,6 +60,39 @@ hubClusterSets:
       # Default-deny egress, FQDN allowlisting via EgressFirewall, and ACL audit
       # logging are tracked separately — each is valuable and each can take a
       # working cluster down if a rule is wrong.
+      # =======================================================================
+      # DATA; the ENABLE flag is the gitops-workloads label below.
+      #
+      # One entry per workload that lives in its own repository. AutoShift
+      # creates the ArgoCD Application; the manifests stay where their owners
+      # work. Adding a workload is a change here, not a new policy directory.
+      #
+      # Required per entry: name, repoUrl, path, destinationNamespace. An entry
+      # missing any of them is skipped entirely rather than producing a
+      # half-populated Application.
+      #
+      # Secrets are NOT deployed by this. A workload needing credentials - an
+      # API key, a CA bundle - gets them out of band, the same way the MaaS
+      # database URL and the Lightspeed key do.
+      gitopsWorkloads:
+        # Shared default; each entry may override it.
+        gitopsNamespace: openshift-gitops
+        workloads:
+          - name: example-agent
+            repoUrl: https://github.com/example-org/example-agent
+            targetRevision: main
+            path: gitops/overlays/production
+            destinationNamespace: example-agent
+            # createNamespace true (default) adds CreateNamespace=true to
+            # syncOptions. Set false when the namespace is owned elsewhere -
+            # by another policy, or by the workload repo itself.
+            createNamespace: true
+            # prune false by default: a policy that deletes a tenant's
+            # resources because a path moved is not a safe default.
+            prune: false
+            selfHeal: true
+            project: default
+
       modelEgress:
         baseline:
           enabled: true
@@ -2077,6 +2110,17 @@ hubClusterSets:
       # a working cluster down, and it needs config.modelEgress above to say
       # which namespaces it governs.
       model-egress: 'false'
+
+      # =======================================================================
+      # GitOps Workloads
+      # =======================================================================
+      # Deploy workloads that live in their OWN repositories as ArgoCD
+      # Applications, rather than vendoring their manifests into this one.
+      # Needs config.gitopsWorkloads above to say which. Off by default:
+      # AutoShift fully owns the Applications it creates, so turning this on
+      # with an empty list is a no-op but turning it on with a wrong path
+      # produces an Application that syncs nothing.
+      gitops-workloads: 'false'
 
       # =======================================================================
       # Agent sandboxing (OpenShell prerequisites)

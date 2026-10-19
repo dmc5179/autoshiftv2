@@ -1,0 +1,39 @@
+# Is each workload actually running, as opposed to having been created?
+#
+# This assertion is the reason the pointer pattern is safe to use. A policy that creates an ArgoCD
+# Application reports compliance on the Application OBJECT - it goes Compliant the moment the CR
+# matches what was asked for. The Application itself can be Degraded, OutOfSync, stuck on a missing
+# repo credential, or pointed at a branch that does not exist, and none of that reaches the policy.
+# It is the same shape as a ConfigurationPolicy naming a CRD that does not exist yet: the thing the
+# policy was told to do succeeded, and the thing you wanted did not happen.
+#
+# inform-only, because a health status can only be observed. Asserted on both conditions, since
+# they fail independently: Synced tells you ArgoCD could read and apply the manifests, Healthy
+# tells you the workload those manifests created came up. A typo in `path` shows as OutOfSync; a
+# CrashLoopBackOff shows as Degraded.
+#
+# argoproj.io/v1alpha1 is spelled out in full. ACM installs app.k8s.io, which serves a resource
+# with the same `application` short name, and `oc get application` silently resolves to the empty
+# one. The explicit group here is load-bearing, not stylistic.
+object-templates-raw: |
+  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
+  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (dig "gitopsWorkloads" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $gitopsNs := (dig "gitopsNamespace" "openshift-gitops" $cfg) hub}}
+  {{hub- range $w := (dig "workloads" (list) $cfg) hub}}
+  {{hub- $name := (dig "name" "" $w) hub}}
+  {{hub- if and $name (dig "repoUrl" "" $w) (dig "path" "" $w) (dig "destinationNamespace" "" $w) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub (dig "gitopsNamespace" $gitopsNs $w) hub}}
+      status:
+        health:
+          status: Healthy
+        sync:
+          status: Synced
+  {{hub- end hub}}
+  {{hub- end hub}}
