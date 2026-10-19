@@ -120,7 +120,38 @@ Two things make that safe:
 A workload with a PVC it cares about should also carry
 `argocd.argoproj.io/sync-options: Prune=false` on that PVC **in its own repo**.
 This policy cannot add it — the annotation belongs on the resource, which lives
-in the other repository.
+in the other repository. Put it on the **Namespace too**: deleting a namespace
+deletes the PVCs inside it, and the PVC's own annotation does not survive its
+namespace going away.
+
+### Adoption is less safe than creation, and it is the adopted cluster that has data
+
+An `Application` this policy creates from scratch carries no
+`resources-finalizer.argocd.argoproj.io`, so deleting it does not cascade.
+
+**That is not true of one it adopts.** Where an `Application` of the same name
+already exists — a workload deployed by hand before this policy, which is the
+normal migration path — the policy reconciles its *spec* and **inherits its
+metadata**. Measured on a live cluster: `mustonlyhave` did **not** strip an
+existing `resources-finalizer`, and the adopted `Application` kept
+cascade-on-delete.
+
+So the generalisation to carry, because it is counter-intuitive:
+
+> "The generated resource is safer than the hand-made one" holds only where
+> the policy **creates** it. On adoption you inherit the existing object's
+> metadata — and the cluster that adopted is the one with history, which is
+> the one with data worth protecting.
+
+On an adopted workload the `Prune=false` annotations are the **primary**
+control, not a redundant second layer over a safer `Application`. Do not
+remove them on the theory that policy management made them unnecessary.
+
+To get the created-from-scratch behaviour on an adopted workload, delete the
+`Application` **without** letting the finalizer run (strip
+`metadata.finalizers` first) and let the policy recreate it. That is a
+deliberate, risky operation on something holding state; the annotations are
+the cheaper answer.
 
 ## What this does not do
 
