@@ -31,7 +31,12 @@ object-templates-raw: |
         modelRef:
           kind: LLMInferenceService
           name: {{hub $name hub}}
-  - complianceType: musthave
+  # mustonlyhave, not musthave: modelRefs and subjects.groups are object LISTS
+  # carrying templated values. musthave merges into a list and never replaces
+  # it, so changing accessGroup would leave the old group alongside the new one
+  # while the policy still reported Compliant - widening access instead of
+  # moving it. See docs/policy-behavior.md.
+  - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: maas.opendatahub.io/v1alpha1
       kind: MaaSAuthPolicy
@@ -46,7 +51,12 @@ object-templates-raw: |
           groups:
             - name: {{hub $group hub}}
           users: []
-  - complianceType: musthave
+  # mustonlyhave for the same reason, and this is the one that bit us. Raising
+  # tokenRateLimit from 100 to 50000 under musthave appended the new entry and
+  # kept the old, leaving tokenRateLimits with BOTH {limit:50000} and
+  # {limit:100} on the live object while the policy reported Compliant - so the
+  # quota raise did not take effect. Every subsequent change would add another.
+  - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: maas.opendatahub.io/v1alpha1
       kind: MaaSSubscription
