@@ -16,6 +16,22 @@ hubClusterSets:
         models:
           - name: 'granite-4-tiny-gpu'
             displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+            # Who may mint a key and spend this model's quota. Narrowed from
+            # the default system:authenticated, which included EVERY
+            # ServiceAccount on the cluster - any pod anywhere could mint and
+            # consume the budget. system:serviceaccounts:hermes is the group
+            # containing every ServiceAccount in the hermes namespace, which
+            # is what the agent runs as and therefore what it mints with.
+            #
+            # Feeds both the MaaSSubscription owner and the MaaSAuthPolicy
+            # subjects; the subscription NAME is unaffected and stays
+            # granite-4-tiny-gpu-default.
+            #
+            # CONSEQUENCE: a human can no longer mint. scripts/35-smoke-test.sh
+            # and scripts/40-lightspeed.sh both mint with `oc whoami -t`, so
+            # both stop working against this model. Add a second group here if
+            # you want them back.
+            accessGroup: 'system:serviceaccounts:hermes'
             # servedModelName defaults to name. Overriding it so the two
             # disagree returns 404 "the model X does not exist" at inference
             # time, long after every policy reports Compliant.
