@@ -16,22 +16,24 @@ hubClusterSets:
         models:
           - name: 'granite-4-tiny-gpu'
             displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
-            # Who may mint a key and spend this model's quota. Narrowed from
-            # the default system:authenticated, which included EVERY
-            # ServiceAccount on the cluster - any pod anywhere could mint and
-            # consume the budget. system:serviceaccounts:hermes is the group
-            # containing every ServiceAccount in the hermes namespace, which
-            # is what the agent runs as and therefore what it mints with.
+            # Who may mint a key and spend this model's quota. Narrowed from the
+            # default system:authenticated, which included EVERY ServiceAccount on
+            # the cluster - any pod anywhere could mint and consume the budget.
+            #
+            #   system:serviceaccounts:hermes  every ServiceAccount in the hermes
+            #       namespace. Hermes mints its own key at startup from its
+            #       ServiceAccount token, so this is what keeps it working.
+            #   maas-users  the htpasswd group from config.htpasswdUsers below. A
+            #       person in it can mint keys from the dashboard or the API, and
+            #       scripts/35-smoke-test.sh mints as its user.
             #
             # Feeds both the MaaSSubscription owner and the MaaSAuthPolicy
             # subjects; the subscription NAME is unaffected and stays
-            # granite-4-tiny-gpu-default.
-            #
-            # CONSEQUENCE: a human can no longer mint. scripts/35-smoke-test.sh
-            # and scripts/40-lightspeed.sh both mint with `oc whoami -t`, so
-            # both stop working against this model. Add a second group here if
-            # you want them back.
-            accessGroup: 'system:serviceaccounts:hermes'
+            # granite-4-tiny-gpu-default. kubeadmin is in neither group and cannot
+            # mint against this model - by design.
+            accessGroups:
+              - 'system:serviceaccounts:hermes'
+              - 'maas-users'
             # servedModelName defaults to name. Overriding it so the two
             # disagree returns 404 "the model X does not exist" at inference
             # time, long after every policy reports Compliant.
@@ -208,6 +210,28 @@ hubClusterSets:
           eda:
             disabled: false
       # ===================================================================
+      # A person who can log in and mint MaaS keys. DATA; the ENABLE flag is
+      # the htpasswd-users label.
+      #
+      # The password is NOT here and never in git. scripts/maas-user.sh
+      # generates it, writes it to secrets/maas-user.env, and creates the
+      # htpasswd Secret in openshift-config. The policy adds the identity
+      # provider only once that Secret exists, so order does not matter.
+      #
+      # No RBAC is needed to mint a MaaS key - membership of maas-users,
+      # listed in accessGroups above, is the whole grant. view on llm lets the
+      # user see the model they are calling; nothing more.
+      htpasswdUsers:
+        providerName: htpasswd
+        secretName: htpasswd-users
+        groups:
+          - name: maas-users
+            users:
+              - maas-user
+            namespaceRoles:
+              - namespace: llm
+                role: view
+      # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
       #
@@ -322,7 +346,13 @@ hubClusterSets:
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.
-      gitops-workloads: 'true'
+      # 'false' for now: the only Hermes overlay hardcodes the old sandbox3587
+      # cluster (MaaS URL, ingress CA, Route host), and Hermes needs an
+      # out-of-band Secret. Re-enable once Hermes has a cluster-agnostic overlay.
+      gitops-workloads: 'false'
+      # HTPasswd identity provider + the maas-users group. Reads
+      # config.htpasswdUsers above.
+      htpasswd-users: 'true'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator

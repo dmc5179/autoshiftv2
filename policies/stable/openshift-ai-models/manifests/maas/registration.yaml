@@ -17,7 +17,15 @@ object-templates-raw: |
   {{hub- $maasNs := (dig "maasNamespace" "models-as-a-service" $cfg) hub}}
   {{hub- range $m := (dig "models" (list) $cfg) hub}}
   {{hub- $name := (dig "name" "" $m) hub}}
-  {{hub- $group := (dig "accessGroup" "system:authenticated" $m) hub}}
+  # Who may mint keys and spend this model's quota. accessGroups is a list, so a
+  # ServiceAccount group (an agent minting for itself) and a human group can both be granted.
+  # accessGroup, the older single-string form, is still honoured when accessGroups is absent,
+  # so existing values files keep working. MaaS checks only group membership here - no
+  # Kubernetes RBAC is needed to mint a key.
+  {{hub- $groups := (dig "accessGroups" (list) $m) hub}}
+  {{hub- if not $groups hub}}
+  {{hub- $groups = (list (dig "accessGroup" "system:authenticated" $m)) hub}}
+  {{hub- end hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: maas.opendatahub.io/v1alpha1
@@ -49,7 +57,9 @@ object-templates-raw: |
             namespace: {{hub $ns hub}}
         subjects:
           groups:
-            - name: {{hub $group hub}}
+            {{hub- range $g := $groups hub}}
+            - name: {{hub $g hub}}
+            {{hub- end hub}}
           users: []
   # mustonlyhave for the same reason, and this is the one that bit us. Raising
   # tokenRateLimit from 100 to 50000 under musthave appended the new entry and
@@ -66,7 +76,9 @@ object-templates-raw: |
       spec:
         owner:
           groups:
-            - name: {{hub $group hub}}
+            {{hub- range $g := $groups hub}}
+            - name: {{hub $g hub}}
+            {{hub- end hub}}
           users: []
         modelRefs:
           - name: {{hub $name hub}}
