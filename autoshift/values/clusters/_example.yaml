@@ -97,6 +97,9 @@ clusters:
       # Deploy workloads that live in their own repositories, as ArgoCD
       # Applications. Needs config.gitopsWorkloads to say which.
       gitops-workloads: 'false'
+      # HTPasswd identity provider, Groups and role bindings. Needs
+      # config.htpasswdUsers, and an htpasswd Secret created out of band.
+      htpasswd-users: 'false'
       gpu-nodes: '1'
       gpu-nodes-provider: aws
       gpu-nodes-instance-type: 'g6.xlarge'

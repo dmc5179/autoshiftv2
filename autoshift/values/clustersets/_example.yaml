@@ -74,6 +74,28 @@ hubClusterSets:
       # Secrets are NOT deployed by this. A workload needing credentials - an
       # API key, a CA bundle - gets them out of band, the same way the MaaS
       # database URL and the Lightspeed key do.
+      # =======================================================================
+      # DATA; the ENABLE flag is the htpasswd-users label below.
+      #
+      # Users who log in with a password, and the Groups they belong to. A MaaS
+      # subscription is owned by Groups, so this is how a person - rather than
+      # kubeadmin or a ServiceAccount - gets to mint an API key: put them in a
+      # Group here and list that Group in openshiftAiModels.models[].accessGroups.
+      #
+      # Minting a MaaS key needs NO Kubernetes RBAC. Bind roles only for what
+      # the person does beyond calling models.
+      htpasswdUsers:
+        providerName: htpasswd
+        secretName: htpasswd-users
+        groups:
+          - name: maas-users
+            users:
+              - maas-user
+            clusterRoles: []
+            namespaceRoles:
+              - namespace: llm
+                role: view
+
       gitopsWorkloads:
         # Shared default; each entry may override it.
         gitopsNamespace: openshift-gitops
@@ -2121,6 +2143,15 @@ hubClusterSets:
       # with an empty list is a no-op but turning it on with a wrong path
       # produces an Application that syncs nothing.
       gitops-workloads: 'false'
+
+      # =======================================================================
+      # HTPasswd Users
+      # =======================================================================
+      # Adds an HTPasswd identity provider, declares Groups of its users, and
+      # binds roles to them. Needs config.htpasswdUsers above, and an htpasswd
+      # Secret in openshift-config created out of band - the password hashes
+      # are never in git. The provider is only added once that Secret exists.
+      htpasswd-users: 'false'
 
       # =======================================================================
       # Agent sandboxing (OpenShell prerequisites)

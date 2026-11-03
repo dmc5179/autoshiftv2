@@ -1,0 +1,47 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: htpasswd-users
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml - never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber. The manifests read the policy
+# namespace from .PolicyMetadata.namespace instead.
+#
+# What users exist and what they may do comes from config.htpasswdUsers: groups, members and role
+# bindings are structured records, and a label is a string. The htpasswd Secret itself - the
+# password hashes - is created out of band and is never in git.
+placementBindingDefaults:
+  name: binding-policy-htpasswd-users
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: high
+  consolidateManifests: true
+  # None: turning this policy off must not delete Groups or bindings people are using, nor
+  # touch the OAuth identity provider list. Removal is a deliberate act.
+  pruneObjectBehavior: None
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - AC Access Control
+  controls:
+    - AC-2 Account Management
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-htpasswd-users
+    manifests:
+      - path: manifests/identity
+      - path: manifests/groups
+  # Separate inform policy: a root remediationAction overrides its children, so an assertion
+  # cannot be bundled inside an enforcing policy.
+  - name: policy-htpasswd-users-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-htpasswd-users
+    manifests:
+      - path: test/htpasswd-users-ready.yaml
