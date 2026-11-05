@@ -1,7 +1,7 @@
 # osc AutoShift Policy
 
 ## Overview
-Installs the sandboxed-containers-operator operator using AutoShift's ACM **PolicyGenerator** pattern. The
+Installs the sandboxed-containers-operator operator by using AutoShift's ACM **PolicyGenerator** pattern. The
 directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
 `manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
 

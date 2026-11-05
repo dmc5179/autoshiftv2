@@ -86,7 +86,7 @@ or pointed at a branch that does not exist. Same shape as a
 told to do succeeded, and what you wanted did not happen.
 
 `policy-gitops-workloads-ready` asserts both conditions, because they fail
-independently. A typo in `path` shows as `OutOfSync`; a `CrashLoopBackOff` shows
+independently. A mistyped `path` shows as `OutOfSync`; a `CrashLoopBackOff` shows
 as `Degraded`.
 
 ## AutoShift owns these Applications
@@ -136,7 +136,7 @@ metadata**. Measured on a live cluster: `mustonlyhave` did **not** strip an
 existing `resources-finalizer`, and the adopted `Application` kept
 cascade-on-delete.
 
-So the generalisation to carry, because it is counter-intuitive:
+The generalisation to carry, because it is counter-intuitive:
 
 > "The generated resource is safer than the hand-made one" holds only where
 > the policy **creates** it. On adoption you inherit the existing object's
@@ -149,7 +149,7 @@ remove them on the theory that policy management made them unnecessary.
 
 To get the created-from-scratch behaviour on an adopted workload, delete the
 `Application` **without** letting the finalizer run (strip
-`metadata.finalizers` first) and let the policy recreate it. That is a
+`metadata.finalizers` first) and let the policy create it again. That is a
 deliberate, risky operation on something holding state; the annotations are
 the cheaper answer.
 

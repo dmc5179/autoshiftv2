@@ -34,7 +34,7 @@ config:
 
 Enable with `autoshift.io/model-egress: 'true'`.
 
-Each listed namespace is labelled `autoshift.io/ai-workload`, which is what the
+Each listed namespace is labeled `autoshift.io/ai-workload`, which is what the
 `AdminNetworkPolicy` selects on.
 
 **Do not list `models-as-a-service` or `redhat-ai-gateway-infra`.** maas-api,
@@ -89,4 +89,5 @@ egress rule sees it. Closing it needs CoreDNS forward-policy work.
 
 **Content, as opposed to connections.** NeMo Guardrails filters the inference
 request path; it cannot see an outbound call an agent process makes. It lowers
-the chance something asks to call out. Network policy is what stops the call.
+the chance that something asks to make an outbound call. Network policy is what
+stops the call.
