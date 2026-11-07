@@ -104,6 +104,7 @@ clusters:
       gpu-nodes-provider: aws
       gpu-nodes-instance-type: 'g6.xlarge'
       gpu-nodes-zone-1: 'us-east-2a'
+      gpu-nodes-region: 'us-east-2'
       gpu-nodes-spot: 'false'
 
       # =======================================================================
@@ -298,9 +299,8 @@ clusters:
       #   mcp-catalog    Technology Preview, requires OpenShift 4.22 or later.
       #                  Enables the mcplifecycleoperator component and the
       #                  dashboard flag together - either alone is broken.
-      #   agents-catalog Developer Preview. The flag name comes from the 3.5
-      #                  release notes rather than a documented procedure;
-      #                  confirm it against your cluster before relying on it.
+      #   agents-catalog Developer Preview. A dashboard flag only, documented in
+      #                  the 3.5 release notes.
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
 
@@ -334,3 +334,27 @@ clusters:
       mcp-gateway-source: redhat-operators
       mcp-gateway-source-namespace: openshift-marketplace
       mcp-gateway-version: ''
+
+      # =======================================================================
+      # Agent sandboxing (OpenShell prerequisites)
+      # =======================================================================
+      agent-sandbox: 'false'
+      agent-sandbox-subscription-name: agent-sandbox-operator
+      agent-sandbox-channel: preview-0.9
+      agent-sandbox-source: redhat-operators
+      agent-sandbox-source-namespace: openshift-marketplace
+      agent-sandbox-version: ''
+
+      rhbk: 'false'
+      rhbk-subscription-name: rhbk-operator
+      rhbk-channel: stable-v26.6
+      rhbk-source: redhat-operators
+      rhbk-source-namespace: openshift-marketplace
+      rhbk-version: ''
+
+      osc: 'false'
+      osc-subscription-name: sandboxed-containers-operator
+      osc-channel: stable
+      osc-source: redhat-operators
+      osc-source-namespace: openshift-marketplace
+      osc-version: ''

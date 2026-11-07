@@ -2154,9 +2154,6 @@ hubClusterSets:
       leader-worker-set-version: ''
 
       # =======================================================================
-      # Nvidia Gpu Operator
-      # =======================================================================
-      # =======================================================================
       # Model Egress
       # =======================================================================
       # Denies the cloud metadata endpoint (169.254.169.254, fd00:ec2::254) to
@@ -2236,6 +2233,12 @@ hubClusterSets:
       osc-source-namespace: openshift-marketplace
       osc-version: ''
 
+      # =======================================================================
+      # Nvidia Gpu Operator
+      # =======================================================================
+      # Needs node-feature-discovery, whose PCI vendor label
+      # (feature.node.kubernetes.io/pci-10de.present) is how the Operator finds
+      # GPU nodes.
       nvidia-gpu-operator: 'false'
       nvidia-gpu-operator-subscription-name: gpu-operator-certified
       nvidia-gpu-operator-channel: v25.3
@@ -2268,9 +2271,8 @@ hubClusterSets:
       #   mcp-catalog    Technology Preview, requires OpenShift 4.22 or later.
       #                  Enables the mcplifecycleoperator component and the
       #                  dashboard flag together - either alone is broken.
-      #   agents-catalog Developer Preview. The flag name comes from the 3.5
-      #                  release notes rather than a documented procedure;
-      #                  confirm it against your cluster before relying on it.
+      #   agents-catalog Developer Preview. A dashboard flag only, documented in
+      #                  the 3.5 release notes.
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
 
