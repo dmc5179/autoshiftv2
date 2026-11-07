@@ -7,12 +7,13 @@
 #   from installing its CRDs. The symptom is that MaaS never appears, even
 #   though modelsAsAService reads Managed.
 #
-#   aigateway.modelsAsAService is what turns MaaS on, so it follows the
-#   autoshift.io/openshift-ai-maas label: Managed when that label is 'true',
-#   Removed otherwise. The openshift-ai-maas policy supplies the Gateway MaaS
-#   attaches to, and the two are only useful together. Turning the label off
-#   therefore removes MaaS from the cluster, unlike most AutoShift labels,
-#   which stop reconciling without uninstalling anything.
+#   aigateway.modelsAsAService is deliberately absent. It is what turns MaaS
+#   on, and the openshift-ai-maas policy sets it to Managed, alongside the
+#   Gateway MaaS attaches to, by patching this same object once it exists.
+#   musthave on both sides merges only the fields each lists, so leaving it
+#   out here is what stops this policy from overwriting that one. Turning the
+#   autoshift.io/openshift-ai-maas label off stops that management and removes
+#   nothing.
 kind: DataScienceCluster
 apiVersion: datasciencecluster.opendatahub.io/v2
 metadata:
@@ -33,8 +34,7 @@ spec:
     # -- AI Gateway (MaaS modularization, RHOAI 3.5+) --
     aigateway:
       managementState: Managed
-      modelsAsAService:
-        managementState: '{{hub ternary "Managed" "Removed" (eq (index .ManagedClusterLabels "autoshift.io/openshift-ai-maas" | default "false") "true") hub}}'
+      # modelsAsAService: set by the openshift-ai-maas policy, see the header.
     # -- KServe (model serving) --
     kserve:
       managementState: Managed

@@ -310,7 +310,7 @@ hubClusterSets:
       #
       #     openshift-ai: 'true'          # the DataScienceCluster
       #     connectivity-link: 'true'     # Kuadrant/Authorino, the gateway
-      #     openshift-ai-maas: 'true'     # the MaaS gateway itself
+      #     openshift-ai-maas: 'true'     # MaaS in the DSC, and its gateway
       #     openshift-ai-models: 'true'   # plus config.openshiftAiModels
       #
       # openshift-ai-maas was previously 'true' while openshift-ai was

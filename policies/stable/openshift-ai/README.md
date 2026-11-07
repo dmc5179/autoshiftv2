@@ -28,7 +28,6 @@ hubClusterSets:
       # openshift-ai-version: 'rhods-operator.3.5.2'   # optional CSV pin
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
-      openshift-ai-maas: 'false'
 ```
 
 | Label | Meaning |
@@ -36,7 +35,6 @@ hubClusterSets:
 | `openshift-ai` and the standard operator labels | Install the Operator and create the platform |
 | `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP gateway Operator |
 | `openshift-ai-agents-catalog` | Enable the Agents catalog. Developer Preview |
-| `openshift-ai-maas` | Owned by [openshift-ai-maas](../openshift-ai-maas/README.md). This policy reads it to set `aigateway.modelsAsAService` |
 
 Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
@@ -51,11 +49,12 @@ Operator reject `ogx`. That rejection aborts the whole module-provisioning batch
 `aigateway` from installing its CRDs. The symptom is that Models-as-a-Service never appears while
 `modelsAsAService` still reads `Managed`.
 
-**`aigateway.modelsAsAService` follows the `openshift-ai-maas` label.** It is `Managed` when that
-label is `'true'` and `Removed` otherwise, so Models-as-a-Service runs only where the
-`openshift-ai-maas` policy also supplies its Gateway. Unlike most AutoShift labels, turning
-`openshift-ai-maas` off afterwards does not only stop reconciling: this policy sets the component to
-`Removed`, and the Operator removes Models-as-a-Service from the cluster.
+**`aigateway.modelsAsAService` is left out on purpose.** This policy enables `aigateway` but not
+Models-as-a-Service. The [openshift-ai-maas](../openshift-ai-maas/README.md) policy sets
+`modelsAsAService` to `Managed` on this same `DataScienceCluster`, together with the Gateway it
+attaches to. Both policies use `musthave`, which merges only the fields each one lists, so neither
+overwrites the other. Turning the `openshift-ai-maas` label off stops that policy managing the field
+and removes nothing, like most AutoShift labels.
 
 The `DSCInitialization` sets monitoring to `Managed` and deliberately leaves out the metrics and
 traces configuration. Populating it starts the Operator's observability stack (MonitoringStack,
@@ -86,7 +85,8 @@ policy managing it would fight the Operator.
 
 `policy-openshift-ai-dsc` depends on the Operator install, because both CRDs arrive with the CSV and
 a `ConfigurationPolicy` naming an unknown kind reports Compliant while doing nothing. The catalogs
-depend on `policy-openshift-ai-dsc`.
+depend on `policy-openshift-ai-dsc`, and so does `policy-openshift-ai-maas-dsc` in openshift-ai-maas,
+so that none of them creates a partial `default-dsc` before this policy creates the full one.
 
 The OpenShift AI Operator requires cert-manager, from the [cert-manager](../cert-manager/README.md)
 policy. Models-as-a-Service additionally needs [openshift-ai-maas](../openshift-ai-maas/README.md),

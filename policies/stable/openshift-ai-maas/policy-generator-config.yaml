@@ -35,6 +35,18 @@ policies:
       - name: policy-openshift-ai-operator-install
     manifests:
       - path: manifests
+  # Sets aigateway.modelsAsAService to Managed in openshift-ai's
+  # DataScienceCluster. Depends on policy-openshift-ai-dsc, not on the operator
+  # install: musthave creates a missing object, so running before openshift-ai
+  # creates default-dsc would create one holding only this field. Turning the
+  # label off unplaces this policy, which stops managing the field and removes
+  # nothing.
+  - name: policy-openshift-ai-maas-dsc
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/dsc
   # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
   # it never reaches it without MetalLB, so this is where that shows up.
   # The database maas-api needs, and whether maas-api came up because of it.

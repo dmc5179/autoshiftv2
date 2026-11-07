@@ -321,6 +321,10 @@ clusters:
       # =======================================================================
       # Openshift Ai Maas
       # =======================================================================
+      # Turns Models-as-a-Service on: sets aigateway.modelsAsAService to Managed
+      # in openshift-ai's DataScienceCluster and creates the MaaS Gateway.
+      # Turning it off stops that management and removes nothing, like most
+      # AutoShift labels; MaaS keeps running until set to Removed by hand.
       openshift-ai-maas: 'false'
 
       # =======================================================================
