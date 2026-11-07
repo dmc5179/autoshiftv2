@@ -2350,3 +2350,13 @@ hubClusterSets:
       # only until config.ztwim.defaultX509Validity expires. policy-ztwim-operand-drift reports
       # when this is needed and stays Compliant when it is not.
       ztwim-operand-reconcile: 'false'
+
+      # =======================================================================
+      # Mcp Gateway
+      # =======================================================================
+      mcp-gateway: 'false'
+      mcp-gateway-subscription-name: mcp-gateway
+      mcp-gateway-channel: preview
+      mcp-gateway-source: redhat-operators
+      mcp-gateway-source-namespace: openshift-marketplace
+      mcp-gateway-version: ''
