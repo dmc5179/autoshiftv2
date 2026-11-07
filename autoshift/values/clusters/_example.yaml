@@ -280,3 +280,8 @@ clusters:
       openshift-ai-maas: 'false'
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
       openshift-ai-maas-db-secret: maas-db-config
+
+      # =======================================================================
+      # Openshift Ai Models
+      # =======================================================================
+      openshift-ai-models: 'false'

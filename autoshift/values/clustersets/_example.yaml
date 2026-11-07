@@ -51,6 +51,64 @@ hubClusterSets:
   hub:  # ← CHANGE 2: replace with your clusterset name
     config:
       # =======================================================================
+      # openshift-ai-models — which models this cluster serves (DATA; the ENABLE flag is the
+      # openshift-ai-models label below). A model is a structured record, not a string, so it
+      # lives here rather than in a label. Every value below is an example: the namespace, model,
+      # runtime image, groups and rate limit are choices for your cluster.
+      # =======================================================================
+      openshiftAiModels:
+        namespace: 'llm'                         # required: where the LLMInferenceServices live
+        maasNamespace: 'models-as-a-service'     # where MaaS subscriptions live
+        gateway:
+          name: 'maas-default-gateway'
+          namespace: 'openshift-ingress'
+        models:                                  # required, at least one; name, uri, image required
+          - name: 'granite-4-tiny-gpu'
+            displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+            # servedModelName is what callers put in the "model" field of an OpenAI request.
+            # It defaults to name and should usually be left alone: if it disagrees with what
+            # clients send, inference returns 404 "the model X does not exist" long after every
+            # policy has reported Compliant.
+            # servedModelName: 'granite-4-tiny'
+            uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
+            # Example: the vLLM CUDA runtime the rhods-operator 3.5.2 bundle itself
+            # declares (CSV env RELATED_IMAGE_RHAII_VLLM_CUDA_IMAGE, image label
+            # version=3.5.2), so a disconnected mirror of the operator already
+            # carries it. Re-take this digest from the CSV on every RHOAI
+            # upgrade; the previous pin had drifted to a 3.4.1 build.
+            # Pinned by digest, not by tag: there is no :3.0 tag on this
+            # repository, and a wrong tag fails with `manifest unknown`, which
+            # presents as ImagePullBackOff on the runtime container while the
+            # modelcar pulls fine, so it looks like a model problem.
+            image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9@sha256:fd9540f3882b9aae5f862eba6c295d0e9c6b43f8c17b27b179481bfa330bfbc1'
+            replicas: 1
+            gpus: 1
+            requestsCpu: '2'
+            requestsMemory: '8Gi'
+            limitsCpu: '4'
+            limitsMemory: '24Gi'
+            # Who may mint keys and spend this model's quota. A list, so an agent's
+            # ServiceAccount group and a human group can both be granted. Default
+            # when unset: system:authenticated, which includes every ServiceAccount.
+            accessGroups:
+              - system:authenticated
+            # Free tier applied to accessGroups. Example value; the template
+            # default is the same 50000/1m. A 100/1m window was unusable for anything but a
+            # chat probe: an agent framework front-loads tool definitions,
+            # skills and memory on every turn, so one trivial prompt measured
+            # 14,208 tokens - 142x the window. First call succeeded on burst
+            # and everything after it 429'd, which reads as a broken
+            # integration rather than a quota.
+            tokenRateLimit: 50000
+            tokenRateWindow: '1m'
+            # Tool calling. Off unless a parser is named, and the parser is
+            # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
+            # gpt-oss -> openai, Llama 3.1 -> llama3_json (which also needs
+            # chatTemplate). Gemma has no parser and cannot do tool calling.
+            # Required for OpenShift Lightspeed or any agentic client.
+            toolCallParser: 'granite4'
+
+      # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).
       # =======================================================================
@@ -2383,3 +2441,8 @@ hubClusterSets:
       # password), so these only say where to look for it, never what is in it.
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # redhat-ods-applications on RHOAI 3.4
       openshift-ai-maas-db-secret: maas-db-config
+
+      # =======================================================================
+      # Openshift Ai Models
+      # =======================================================================
+      openshift-ai-models: 'false'
