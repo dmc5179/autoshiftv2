@@ -1,0 +1,65 @@
+# The MaaS gateway. Hostname and TLS cert are discovered on the managed
+# cluster rather than configured: the hostname follows the cluster's own
+# ingress domain, and the serving cert is whatever the default IngressController
+# already uses, so this works on any cluster without being told its DNS.
+#
+# A regular {{ }} template resolves on the managed cluster; {{hub hub}} would
+# resolve on the hub, where neither of these is known.
+#
+# The domain comes from ingresses.config.openshift.io/cluster, NOT from the
+# default IngressController's spec.domain. That field is optional and is only
+# populated when someone sets it explicitly; on an ordinary cluster it is
+# empty, and the operator publishes the real value to .status.domain instead.
+# Reading spec.domain yields nil, printf renders it as the literal string
+# "maas.%!s(<nil>)", and the API server rejects the Gateway:
+#
+#   spec.listeners[0].hostname: Invalid value: "maas.%!s(<nil>)"
+#
+# which reads as a templating bug rather than a wrong field. The cluster
+# Ingress config is the canonical source and is always populated; it is also
+# what Red Hat's own MaaS procedure reads (articles/7147064).
+#
+# defaultCertificate keeps a fallback, because it is legitimately unset on a
+# cluster still using the operator-generated serving cert.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: maas-default-gateway
+  namespace: openshift-ingress
+  annotations:
+    opendatahub.io/managed: "false"
+    security.opendatahub.io/authorino-tls-bootstrap: "true"
+spec:
+  gatewayClassName: openshift-default
+  infrastructure:
+    parametersRef:
+      group: ""
+      kind: ConfigMap
+      name: maas-gateway-options
+  listeners:
+    - name: http
+      hostname: '{{ printf "maas.%s" (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}'
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              maas.opendatahub.io/gateway-access: "true"
+    - name: https
+      hostname: '{{ printf "maas.%s" (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}'
+      port: 443
+      protocol: HTTPS
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              maas.opendatahub.io/gateway-access: "true"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: '{{ dig "spec" "defaultCertificate" "name" "router-certs-default" ((lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default") | default dict) }}'

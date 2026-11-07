@@ -1,0 +1,8 @@
+# The GatewayClass the MaaS Gateway binds to. Cluster-scoped and shared, so it
+# is created unconditionally rather than per-tenant.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: openshift-default
+spec:
+  controllerName: "openshift.io/gateway-controller/v1"

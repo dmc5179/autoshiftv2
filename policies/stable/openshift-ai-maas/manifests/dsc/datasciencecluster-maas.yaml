@@ -1,0 +1,25 @@
+# Turns Models-as-a-Service on in the DataScienceCluster that the openshift-ai
+# policy creates. A partial object: musthave merges only the field listed and
+# leaves every other component alone, so this coexists with openshift-ai's
+# full manifest, which deliberately does not mention modelsAsAService. Each
+# policy sets a different scalar field of the same object, so neither
+# overwrites the other.
+#
+# policy-openshift-ai-maas-dsc depends on policy-openshift-ai-dsc being
+# Compliant. Without that, musthave would create a default-dsc holding only
+# this field before openshift-ai creates the real one.
+#
+# Only ever Managed, never a templated Removed. Turning the
+# autoshift.io/openshift-ai-maas label off unplaces this policy, which stops
+# managing the field and removes nothing: MaaS keeps running until someone
+# sets the component to Removed by hand. Most AutoShift labels behave the
+# same way.
+apiVersion: datasciencecluster.opendatahub.io/v2
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+spec:
+  components:
+    aigateway:
+      modelsAsAService:
+        managementState: Managed

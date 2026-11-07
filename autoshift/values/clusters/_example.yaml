@@ -269,3 +269,14 @@ clusters:
       #                  the 3.5 release notes.
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
+
+      # =======================================================================
+      # Openshift Ai Maas
+      # =======================================================================
+      # Turns Models-as-a-Service on: sets aigateway.modelsAsAService to Managed
+      # in openshift-ai's DataScienceCluster and creates the MaaS Gateway.
+      # Turning it off stops that management and removes nothing, like most
+      # AutoShift labels; MaaS keeps running until set to Removed by hand.
+      openshift-ai-maas: 'false'
+      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
+      openshift-ai-maas-db-secret: maas-db-config

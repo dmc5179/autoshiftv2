@@ -1,0 +1,22 @@
+# Resource envelope for the gateway pod. The default istio-proxy request is
+# small enough that the gateway OOMKills under load, which presents as
+# intermittent connection resets rather than anything pointing at memory.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maas-gateway-options
+  namespace: openshift-ingress
+data:
+  deployment: |
+    spec:
+      template:
+        spec:
+          containers:
+          - name: istio-proxy
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: "2"
+                memory: 2Gi

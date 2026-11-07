@@ -1,0 +1,85 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: openshift-ai-maas
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml — never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-openshift-ai-maas
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Default Placement (placement.yaml at the dir root); policies with a different predicate set
+  # their own placement.placementPath. PG includes it and generates only the PlacementBinding.
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-openshift-ai-maas
+    dependencies:
+      - name: policy-openshift-ai-operator-install
+    manifests:
+      - path: manifests
+  # Sets aigateway.modelsAsAService to Managed in openshift-ai's
+  # DataScienceCluster. Depends on policy-openshift-ai-dsc, not on the operator
+  # install: musthave creates a missing object, so running before openshift-ai
+  # creates default-dsc would create one holding only this field. Turning the
+  # label off unplaces this policy, which stops managing the field and removes
+  # nothing.
+  - name: policy-openshift-ai-maas-dsc
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/dsc
+  # The database maas-api needs, and whether maas-api came up because of it.
+  # Separate from -ready, which is about the Gateway: a programmed Gateway and a
+  # working MaaS control plane are different things, and the gap between them is
+  # exactly where a missing database hides. inform-only; the Secret holds a
+  # password and is created out of band, so no policy supplies it.
+  - name: policy-openshift-ai-maas-db
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-maas
+    manifests:
+      - path: test/maas-db-secret.yaml
+        customMessage:
+          noncompliant: >
+            ❌ The maas-api database Secret is missing. maas-api reads its
+            PostgreSQL connection URL from it once at startup and exits
+            without it, so the pod CrashLoopBackOffs and the gateway answers
+            authenticated requests with "no healthy upstream". Create it with
+            the URL under the key DB_CONNECTION_URL, then restart maas-api.
+            With the default name and namespace:
+            oc create secret generic maas-db-config -n redhat-ai-gateway-infra
+            --from-literal=DB_CONNECTION_URL=postgresql://USER:PASSWORD@HOST:5432/DB
+      - path: test/maas-api-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ maas-api is not Available. API key issuance, the model listing and
+            subscription enforcement are down. Inference against an
+            already-issued key may still work, which is why nothing else reports
+            this. Check the Secret above first.
+  # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
+  # it never reaches it without MetalLB, so this is where that shows up.
+  - name: policy-openshift-ai-maas-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-openshift-ai-maas
+    manifests:
+      - path: test/gateway-programmed.yaml
