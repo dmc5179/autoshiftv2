@@ -1,11 +1,8 @@
 # Is the LeaderWorkerSet controller actually running?
 #
 # Asserted on the operator's own Deployment, which is named after the namespace
-# (openshift-lws-operator), not on a controller-manager name. An earlier version
-# of this file asserted lws-controller-manager, which does not exist on this
-# operator at any point — so the check could only ever fail, and said
-# "deployments [lws-controller-manager] not found" rather than anything about
-# the real state.
+# (openshift-lws-operator). This operator has no lws-controller-manager
+# Deployment, so a check written against that name could only ever fail.
 #
 # inform-only: a status can only be observed.
 apiVersion: apps/v1

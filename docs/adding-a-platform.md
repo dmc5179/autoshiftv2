@@ -4,7 +4,7 @@ AutoShift supports Amazon Web Services, VMware vSphere, and bare metal. Four pol
 are platform-specific: `infra-nodes`, `worker-nodes`, `storage-nodes`, and `cluster-install`.
 Everything else discovers what it needs at reconcile time and is platform-neutral.
 
-This page is the checklist for adding a fifth. It is derived from the commits that added vSphere,
+This page is the checklist for adding a fourth. It is derived from the commits that added vSphere,
 restated against the current repository layout.
 
 ## Before starting
@@ -109,7 +109,7 @@ existing sizing labels requires no declaration work.
 | `tools/testdata/acs-secrets.yaml` | A matching `crs-lint-cluster-<variant>` `Secret`. |
 | `tools/internal/resolver/e2e_test.go` | One `assertContains` marker proving the install policy body rendered. |
 
-The last two rows are the easiest to miss. They key off the variant name derived from the example
+The two `acs-*` rows are the easiest to miss. They key off the variant name derived from the example
 filename, and nothing in the platform code refers to them.
 
 Everything else in `e2e_test.go` is glob-driven and needs no change.

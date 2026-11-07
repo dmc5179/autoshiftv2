@@ -13,8 +13,8 @@ spec:
   # any check that looks for NonCompliant.
   #
   # The enablement label below already gates this policy, and openshift-ai,
-  # connectivity-link, node-feature-discovery and nvidia-gpu-operator all rely
-  # on that alone. Matching them keeps the RHOAI chain placeable on a hub.
+  # connectivity-link and node-feature-discovery all rely on that alone.
+  # Matching them keeps the RHOAI chain placeable on a hub.
   predicates:
     - requiredClusterSelector:
         labelSelector:

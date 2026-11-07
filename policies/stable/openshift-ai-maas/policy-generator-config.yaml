@@ -6,8 +6,7 @@ metadata:
 # `kustomize build` runs. They live here and in placement.yaml — never in manifests/, whose hub
 # templates contain `$vars` that substitution would clobber.
 #
-# Each policy references a single bare manifest file (manifests/<policy>.yaml). Add another policy
-# by dropping manifests/<name>.yaml + a policies[] entry here (re-run generate-policy.sh --dir <this>).
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
 placementBindingDefaults:
   name: binding-policy-openshift-ai-maas
 policyDefaults:
@@ -47,8 +46,6 @@ policies:
       - name: policy-openshift-ai-dsc
     manifests:
       - path: manifests/dsc
-  # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
-  # it never reaches it without MetalLB, so this is where that shows up.
   # The database maas-api needs, and whether maas-api came up because of it.
   # Separate from -ready, which is about the Gateway: a programmed Gateway and a
   # working MaaS control plane are different things, and the gap between them is
@@ -78,6 +75,8 @@ policies:
             subscription enforcement are down. Inference against an
             already-issued key may still work, which is why nothing else reports
             this. Check the Secret above first.
+  # inform: Programmed is the signal that MaaS is actually reachable. Off-cloud
+  # it never reaches it without MetalLB, so this is where that shows up.
   - name: policy-openshift-ai-maas-ready
     remediationAction: inform
     dependencies:
