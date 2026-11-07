@@ -24,13 +24,9 @@ object-templates-raw: |
   {{hub- $name := (dig "name" "" $m) hub}}
   # Who may mint keys and spend this model's quota. accessGroups is a list, so a
   # ServiceAccount group (an agent minting for itself) and a human group can both be granted.
-  # accessGroup, the older single-string form, is still honoured when accessGroups is absent,
-  # so existing values files keep working. MaaS checks only group membership here - no
-  # Kubernetes RBAC is needed to mint a key.
-  {{hub- $groups := (dig "accessGroups" (list) $m) hub}}
-  {{hub- if not $groups hub}}
-  {{hub- $groups = (list (dig "accessGroup" "system:authenticated" $m)) hub}}
-  {{hub- end hub}}
+  # Defaults to system:authenticated. MaaS checks only group membership here - no Kubernetes
+  # RBAC is needed to mint a key.
+  {{hub- $groups := (dig "accessGroups" (list "system:authenticated") $m) hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: maas.opendatahub.io/v1alpha1
@@ -46,7 +42,7 @@ object-templates-raw: |
           name: {{hub $name hub}}
   # mustonlyhave, not musthave: modelRefs and subjects.groups are object LISTS
   # carrying templated values. musthave merges into a list and never replaces
-  # it, so changing accessGroup would leave the old group alongside the new one
+  # it, so changing accessGroups would leave the old group alongside the new one
   # while the policy still reported Compliant - widening access instead of
   # moving it. See docs/policy-behavior.md.
   - complianceType: mustonlyhave

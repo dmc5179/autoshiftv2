@@ -3,7 +3,7 @@
 Creates GPU MachineSets by cloning the cluster's own worker MachineSet, so a cluster can grow GPU
 capacity without anyone hand-writing a MachineSet.
 
-AWS only. `nvidia-gpu-operator` installs the driver stack; this policy only provides the hardware
+AWS only. The NVIDIA GPU Operator installs the driver stack; this policy only provides the hardware
 for it to run on.
 
 ## Labels

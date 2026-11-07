@@ -104,7 +104,7 @@ assertion mean anything.
 - [openshift-ai](../openshift-ai/README.md) and [openshift-ai-maas](../openshift-ai-maas/README.md),
   for the `DataScienceCluster` and the MaaS gateway. `policy-openshift-ai-models` depends on
   `policy-openshift-ai-maas`.
-- A GPU node with the driver stack, for GPU models: `gpu-nodes` plus `nvidia-gpu-operator`.
+- A GPU node with the driver stack, for GPU models: `gpu-nodes` plus the NVIDIA GPU Operator.
   The pod tolerates the valueless `nvidia.com/gpu:NoSchedule` taint `gpu-nodes` applies.
 
 A model pinned to a GPU it cannot get stays Pending indefinitely; `policy-openshift-ai-models-ready`

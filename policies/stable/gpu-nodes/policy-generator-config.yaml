@@ -49,6 +49,6 @@ policies:
           noncompliant: >
             ❌ A GPU node is not Ready, or reports no nvidia.com/gpu capacity — the instance
             booted but the NVIDIA driver stack did not finish. Check the
-            nvidia-gpu-operator ClusterPolicy.
+            NVIDIA GPU Operator ClusterPolicy.
     placement:
       placementPath: placement-test.yaml
