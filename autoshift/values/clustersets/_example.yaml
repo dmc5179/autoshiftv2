@@ -2350,3 +2350,45 @@ hubClusterSets:
       # only until config.ztwim.defaultX509Validity expires. policy-ztwim-operand-drift reports
       # when this is needed and stays Compliant when it is not.
       ztwim-operand-reconcile: 'false'
+
+      # =======================================================================
+      # Agent sandboxing (OpenShell prerequisites)
+      # =======================================================================
+      # OpenShell itself is not an operator — it is a Helm chart plus raw manifests from
+      # upstream NVIDIA, Developer Preview in RHOAI 3.5 and explicitly not supported for
+      # production. These are the OLM operators it depends on, which is the part OLM
+      # air-gapped mirroring and AutoShift can actually manage. SPIFFE workload identity
+      # for agents, where wanted, comes from the ztwim policy: see the Zero Trust Workload
+      # Identity Manager (SPIRE) labels.
+
+      # Red Hat build of Agent Sandbox. REQUIRED by OpenShell: its preflight checks for
+      # sandboxes.agents.x-k8s.io serving v1beta1 and an agent-sandbox-operator CSV.
+      # Prefer this over the upstream kubernetes-sigs manifest — installing both collides,
+      # same CRDs and same agent-sandbox-system namespace. Needs RHCOS workers; RHEL nodes
+      # are not supported.
+      agent-sandbox: 'false'
+      agent-sandbox-subscription-name: agent-sandbox-operator
+      agent-sandbox-channel: preview-0.9
+      agent-sandbox-source: redhat-operators
+      agent-sandbox-source-namespace: openshift-marketplace
+      agent-sandbox-version: ''
+
+      # Red Hat build of Keycloak. Required for any remote OpenShell gateway: gateways
+      # authenticate CLI users over OIDC, not mTLS. Port-forward is evaluation only.
+      rhbk: 'false'
+      rhbk-subscription-name: rhbk-operator
+      rhbk-channel: stable-v26.6
+      rhbk-source: redhat-operators
+      rhbk-source-namespace: openshift-marketplace
+      rhbk-version: ''
+
+      # OpenShift sandboxed containers (Kata) — optional second isolation layer, VM-level
+      # under OpenShell's kernel-enforced one. Agent Sandbox does not need it. Note the
+      # default Kata initramfs ships without nf_tables, which OpenShell's sidecar topology
+      # requires, and that patch is lost on every worker reboot.
+      osc: 'false'
+      osc-subscription-name: sandboxed-containers-operator
+      osc-channel: stable
+      osc-source: redhat-operators
+      osc-source-namespace: openshift-marketplace
+      osc-version: ''

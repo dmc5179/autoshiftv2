@@ -249,3 +249,27 @@ clusters:
       opentelemetry-channel: stable
       opentelemetry-source: redhat-operators
       opentelemetry-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Agent sandboxing (OpenShell prerequisites)
+      # =======================================================================
+      agent-sandbox: 'false'
+      agent-sandbox-subscription-name: agent-sandbox-operator
+      agent-sandbox-channel: preview-0.9
+      agent-sandbox-source: redhat-operators
+      agent-sandbox-source-namespace: openshift-marketplace
+      agent-sandbox-version: ''
+
+      rhbk: 'false'
+      rhbk-subscription-name: rhbk-operator
+      rhbk-channel: stable-v26.6
+      rhbk-source: redhat-operators
+      rhbk-source-namespace: openshift-marketplace
+      rhbk-version: ''
+
+      osc: 'false'
+      osc-subscription-name: sandboxed-containers-operator
+      osc-channel: stable
+      osc-source: redhat-operators
+      osc-source-namespace: openshift-marketplace
+      osc-version: ''
