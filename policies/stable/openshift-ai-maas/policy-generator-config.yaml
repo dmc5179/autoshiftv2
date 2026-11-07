@@ -51,11 +51,14 @@ policies:
       - path: test/maas-db-secret.yaml
         customMessage:
           noncompliant: >
-            ❌ The maas-db-config Secret is missing. maas-api reads its PostgreSQL
-            URL from it once at startup and exits without it, so the pod
-            CrashLoopBackOffs and the gateway answers authenticated requests with
-            "no healthy upstream". Create it with scripts/maas-database.sh in the
-            rhoai-mass-quickstart repo, or by hand for an in-cluster database.
+            ❌ The maas-api database Secret is missing. maas-api reads its
+            PostgreSQL connection URL from it once at startup and exits
+            without it, so the pod CrashLoopBackOffs and the gateway answers
+            authenticated requests with "no healthy upstream". Create it with
+            the URL under the key DB_CONNECTION_URL, then restart maas-api.
+            With the default name and namespace:
+            oc create secret generic maas-db-config -n redhat-ai-gateway-infra
+            --from-literal=DB_CONNECTION_URL=postgresql://USER:PASSWORD@HOST:5432/DB
       - path: test/maas-api-ready.yaml
         customMessage:
           noncompliant: >

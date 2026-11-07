@@ -1,54 +1,114 @@
-# openshift-ai-maas AutoShift Policy
+# openshift-ai-maas
 
-## Overview
+Creates the gateway that Models-as-a-Service (MaaS) in Red Hat OpenShift AI serves models through,
+and reports whether the MaaS control plane behind it came up.
 
-Enables Models-as-a-Service on a cluster that already has Red Hat OpenShift AI, using AutoShift's
-ACM **PolicyGenerator** pattern. MaaS puts an authenticating, rate-limiting gateway in front of
-served models, so consumers reach them with an API key over the OpenAI API rather than talking to
-an inference service directly.
+MaaS puts an authenticating, rate-limiting gateway in front of served models. Consumers reach a
+model with an API key over the OpenAI API rather than calling an inference service directly.
+OpenShift AI deploys the MaaS components itself once its `DataScienceCluster` enables
+`aigateway.modelsAsAService`. This policy supplies what the product leaves to the administrator:
+the `Gateway` those components attach to.
 
-This policy covers the platform. Deploying an actual model is
-[openshift-ai-models](../openshift-ai-models/README.md).
+Deploying a model behind the gateway is [openshift-ai-models](../openshift-ai-models/README.md).
 
-## What it configures
+## Policies
 
-- `DSCInitialization` and `DataScienceCluster` with the `aigateway` component and
-  `modelsAsAService` managed
-- The `maas-default-gateway` Gateway and its `GatewayClass`
-- The PostgreSQL instance MaaS stores subscription and key state in
-- The default `AITenant`
+| Policy | Mode | What it does |
+|---|---|---|
+| `policy-openshift-ai-maas` | enforce | The `openshift-default` GatewayClass, the `maas-gateway-options` ConfigMap and the `maas-default-gateway` Gateway in `openshift-ingress` |
+| `policy-openshift-ai-maas-ready` | inform | The Gateway reports `Programmed=True` |
+| `policy-openshift-ai-maas-db` | inform | The maas-api database Secret exists, and the `maas-api` Deployment is `Available` |
+
+## Enabling
+
+```yaml
+hubClusterSets:
+  hub:
+    labels:
+      openshift-ai: 'true'
+      openshift-ai-maas: 'true'
+      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # optional
+      openshift-ai-maas-db-secret: maas-db-config               # optional
+```
+
+| Label | Default | Meaning |
+|---|---|---|
+| `openshift-ai-maas` | | Enables this policy. The `openshift-ai` policy also reads it, to set `aigateway.modelsAsAService` in the `DataScienceCluster` |
+| `openshift-ai-maas-db-namespace` | `redhat-ai-gateway-infra` | Namespace of `maas-api` and its database Secret. On Red Hat OpenShift AI 3.4 this was `redhat-ods-applications` |
+| `openshift-ai-maas-db-secret` | `maas-db-config` | Name of the database Secret |
+
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
+
+## The gateway
+
+The listener hostname is `maas.<ingress domain>`, discovered on the managed cluster, so the policy
+needs no per-cluster DNS. The domain comes from the cluster `Ingress` configuration
+(`ingresses.config.openshift.io/cluster`), which is always populated. The default
+`IngressController` `spec.domain` is not: it is set only when someone configures it, and a template
+reading it renders `maas.%!s(<nil>)`, which the API server rejects as a hostname.
+
+The HTTPS listener serves the default `IngressController` certificate, falling back to
+`router-certs-default` on a cluster still using the generated one.
+
+Both listeners admit routes only from namespaces labeled
+`maas.opendatahub.io/gateway-access: 'true'`. A model's `HTTPRoute` in an unlabeled namespace is
+created without error, and the gateway answers 404. The `openshift-ai-models` policy labels its
+namespace.
+
+`maas-gateway-options` raises the gateway pod's `istio-proxy` resources. With the default request
+the gateway runs out of memory under load, which presents as intermittent connection resets rather
+than anything pointing at memory.
+
+## The database Secret
+
+maas-api stores API keys and subscription state in PostgreSQL. It reads the connection URL from a
+Secret once, at startup, and exits when the Secret is missing:
+
+```
+error: failed to load database URL: failed to read secret
+redhat-ai-gateway-infra/maas-db-config: secrets "maas-db-config" not found
+```
+
+The pod then restarts indefinitely, and authenticated requests to the gateway return
+`no healthy upstream`. The Gateway is still `Programmed`, and every enforcing policy is still
+Compliant. `policy-openshift-ai-maas-db` exists to report this at the layer that owns it.
+
+No policy creates the Secret, because the URL carries a password. Create it out of band, with the
+URL under the key `DB_CONNECTION_URL`, then restart maas-api:
+
+```bash
+oc create secret generic maas-db-config -n redhat-ai-gateway-infra \
+  --from-literal=DB_CONNECTION_URL='postgresql://USER:PASSWORD@HOST:5432/DB'
+oc rollout restart deployment/maas-api -n redhat-ai-gateway-infra
+```
+
+Any PostgreSQL that maas-api can reach works: a managed cloud database, or one in the cluster.
+
+The `maas-api` check matters separately from the Gateway check. Serving and governance are separate
+paths through the same gateway: with maas-api down, a model keeps answering requests made with an
+existing key, while API key issuance, the model listing and subscription enforcement stop.
 
 ## Dependencies
 
-Ordered by `policy-generator-config.yaml`, and all of them have to be in place first:
+`policy-openshift-ai-maas` depends on `policy-openshift-ai-operator-install`. The rest are runtime
+requirements that no `dependencies` entry expresses:
 
 | Needs | Provided by |
 |---|---|
-| Red Hat OpenShift AI | [openshift-ai](../openshift-ai/README.md) |
-| Red Hat Connectivity Link (Kuadrant, Authorino, Limitador) | [connectivity-link](../connectivity-link/README.md) |
-| cert-manager | [cert-manager](../cert-manager/README.md) |
-| Leader Worker Set | [leader-worker-set](../leader-worker-set/README.md) |
-| User Workload Monitoring | [user-workload-monitoring](../user-workload-monitoring/README.md) |
-| A `LoadBalancer` the gateway can claim | the cloud provider, or [metallb](../metallb/README.md) off-cloud |
+| Red Hat OpenShift AI with `modelsAsAService` enabled | [openshift-ai](../openshift-ai/README.md), with this policy's label set |
+| Red Hat Connectivity Link: Kuadrant, Authorino and Limitador | [connectivity-link](../connectivity-link/README.md) |
+| LeaderWorkerSet, for distributed inference | [leader-worker-set](../leader-worker-set/README.md) |
+| cert-manager, which the OpenShift AI operator requires | [cert-manager](../cert-manager/README.md) |
+| A `LoadBalancer` the gateway can claim | the cloud provider, or [metallb](../metallb/README.md) elsewhere |
 
-On a non-cloud cluster the gateway cannot reach `Programmed=True` without MetalLB, and external
-traffic additionally needs a passthrough Route.
+Without a load balancer the Gateway never reaches `Programmed`, and `policy-openshift-ai-maas-ready`
+stays NonCompliant. External traffic to a gateway outside a cloud additionally needs a passthrough
+Route.
 
-## Labels
-
-| Label | Meaning |
-|---|---|
-| `openshift-ai-maas` | enable on this cluster |
-
-Declared in `autoshift/values/clustersets/_example.yaml`. Labels are set in values files only;
-never on a `ManagedCluster` directly.
-
-## Test Locally
+## Verifying
 
 ```bash
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/openshift-ai-maas
-
-make test
+oc get gateway maas-default-gateway -n openshift-ingress
+oc get deployment maas-api -n redhat-ai-gateway-infra
+oc get secret maas-db-config -n redhat-ai-gateway-infra
 ```
