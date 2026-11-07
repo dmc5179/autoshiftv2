@@ -8,6 +8,8 @@ This policy installs the Operator only. It creates no sandboxes, and OpenShell i
 policy: it is a Helm chart plus manifests with no OperatorHub entry, and is not supported for
 production. The OLM operators it depends on are the part AutoShift and disconnected mirroring can
 manage. The others are the optional [rhbk](../rhbk/README.md) and [osc](../osc/README.md) policies.
+SPIFFE workload identity for agents, where wanted, comes from the separate
+[ztwim](../ztwim/README.md) policy.
 
 ## Policies
 

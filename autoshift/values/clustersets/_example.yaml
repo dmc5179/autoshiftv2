@@ -2187,7 +2187,9 @@ hubClusterSets:
       # OpenShell itself is not an operator — it is a Helm chart plus raw manifests from
       # upstream NVIDIA, Developer Preview in RHOAI 3.5 and explicitly not supported for
       # production. These are the OLM operators it depends on, which is the part OLM
-      # air-gapped mirroring and AutoShift can actually manage.
+      # air-gapped mirroring and AutoShift can actually manage. SPIFFE workload identity
+      # for agents, where wanted, comes from the ztwim policy: see the Zero Trust Workload
+      # Identity Manager (SPIRE) labels.
 
       # Red Hat build of Agent Sandbox. REQUIRED by OpenShell: its preflight checks for
       # sandboxes.agents.x-k8s.io serving v1beta1 and an agent-sandbox-operator CSV.
@@ -2200,17 +2202,6 @@ hubClusterSets:
       agent-sandbox-source: redhat-operators
       agent-sandbox-source-namespace: openshift-marketplace
       agent-sandbox-version: ''
-
-      # Zero Trust Workload Identity Manager — SPIFFE agent identity / token exchange only.
-      # Its install namespace is load-bearing: the OIDC discovery provider never becomes
-      # ready when ZTWIM is installed into an openshift-* namespace, so the policy uses its
-      # suggested namespace instead.
-      ztwim: 'false'
-      ztwim-subscription-name: openshift-zero-trust-workload-identity-manager
-      ztwim-channel: stable-v1
-      ztwim-source: redhat-operators
-      ztwim-source-namespace: openshift-marketplace
-      ztwim-version: ''
 
       # Red Hat build of Keycloak. Required for any remote OpenShell gateway: gateways
       # authenticate CLI users over OIDC, not mTLS. Port-forward is evaluation only.
