@@ -83,7 +83,9 @@ hubClusterSets:
       # Group here and list that Group in openshiftAiModels.models[].accessGroups.
       #
       # Minting a MaaS key needs NO Kubernetes RBAC. Bind roles only for what
-      # the person does beyond calling models.
+      # the person does beyond calling models. The group, user and namespace
+      # below are examples. Required when the htpasswd-users label is on;
+      # groups are optional, and each group needs a name.
       htpasswdUsers:
         providerName: htpasswd
         secretName: htpasswd-users
@@ -132,15 +134,16 @@ hubClusterSets:
       # =======================================================================
       # openshift-ai-models — which models this cluster serves (DATA; the ENABLE flag is the
       # openshift-ai-models label below). A model is a structured record, not a string, so it
-      # lives here rather than in a label.
+      # lives here rather than in a label. Every value below is an example: the namespace, model,
+      # runtime image, groups and rate limit are choices for your cluster.
       # =======================================================================
       openshiftAiModels:
-        namespace: 'llm'                         # where the LLMInferenceServices live
+        namespace: 'llm'                         # required: where the LLMInferenceServices live
         maasNamespace: 'models-as-a-service'     # where MaaS subscriptions live
         gateway:
           name: 'maas-default-gateway'
           namespace: 'openshift-ingress'
-        models:
+        models:                                  # required, at least one; name, uri, image required
           - name: 'granite-4-tiny-gpu'
             displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
             # servedModelName is what callers put in the "model" field of an OpenAI request.
@@ -149,7 +152,7 @@ hubClusterSets:
             # policy has reported Compliant.
             # servedModelName: 'granite-4-tiny'
             uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
-            # The vLLM CUDA runtime the rhods-operator 3.5.2 bundle itself
+            # Example: the vLLM CUDA runtime the rhods-operator 3.5.2 bundle itself
             # declares (CSV env RELATED_IMAGE_RHAII_VLLM_CUDA_IMAGE, image label
             # version=3.5.2), so a disconnected mirror of the operator already
             # carries it. Re-take this digest from the CSV on every RHOAI
@@ -171,8 +174,8 @@ hubClusterSets:
             # system:authenticated, which includes every ServiceAccount.
             accessGroups:
               - system:authenticated
-            # Free tier applied to accessGroups.
-            # 50000/1m. The previous 100/1m was unusable for anything but a
+            # Free tier applied to accessGroups. Example value; the template
+            # default is the same 50000/1m. A 100/1m window was unusable for anything but a
             # chat probe: an agent framework front-loads tool definitions,
             # skills and memory on every turn, so one trivial prompt measured
             # 14,208 tokens - 142x the window. First call succeeded on burst

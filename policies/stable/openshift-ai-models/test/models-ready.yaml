@@ -8,11 +8,16 @@
 # Readiness is asserted on the LLMInferenceService's Ready condition rather than on a Deployment
 # name, because KServe owns the workload naming and it is not ours to predict.
 object-templates-raw: |
-  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
-  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
-  {{hub- $cfg := (dig "openshiftAiModels" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
-  {{hub- $ns := (dig "namespace" "llm" $cfg) hub}}
-  {{hub- range $m := (dig "models" (list) $cfg) hub}}
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "openshiftAiModels" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "" $cfg) hub}}
+  {{hub- if not $ns hub}}{{hub fail "openshift-ai-models: config.openshiftAiModels.namespace is required" hub}}{{hub- end hub}}
+  {{hub- $models := (dig "models" (list) $cfg) hub}}
+  {{hub- if not $models hub}}{{hub fail "openshift-ai-models: config.openshiftAiModels.models is missing or empty" hub}}{{hub- end hub}}
+  {{hub- range $m := $models hub}}
+  {{hub- if not (and (dig "name" "" $m) (dig "uri" "" $m) (dig "image" "" $m)) hub}}{{hub fail "openshift-ai-models: every config.openshiftAiModels.models entry needs name, uri and image" hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- range $m := $models hub}}
   {{hub- $name := (dig "name" "" $m) hub}}
   - complianceType: musthave
     objectDefinition:
