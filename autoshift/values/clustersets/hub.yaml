@@ -766,7 +766,7 @@ hubClusterSets:
       jfrog-node-replicas: '2'
       artifactory-db-backups: 'false'
       ### cloudnative-pg
-      cloudnative-pg: 'true'
+      cloudnative-pg: 'false'
       cloudnative-pg-subscription-name: cloudnative-pg
       cloudnative-pg-channel: stable-v1
       cloudnative-pg-source: certified-operators
