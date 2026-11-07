@@ -7,12 +7,20 @@
 #   - the provider URL must end in /v1
 #   - rhoai_vllm is the right type for a self-hosted vLLM endpoint
 #
-# The URL is discovered on the managed cluster from the default
-# IngressController, the same way the MaaS gateway builds its hostname, so
-# this works on any cluster without being told its DNS. The model id and the
-# Secret name come from hub labels, because neither can be discovered: the
-# model id is only known by querying the gateway's own model listing, which a
-# template cannot do.
+# The URL is discovered on the managed cluster, the same way the MaaS gateway
+# builds its hostname, so this works on any cluster without being told its
+# DNS. The domain comes from the cluster Ingress config
+# (ingresses.config.openshift.io/cluster), which is always populated. The
+# default IngressController's spec.domain is set only when someone configures
+# it; reading it renders "https://maas.%!s(<nil>)/v1", a valid string that
+# gives an assistant failing every request.
+#
+# The model id comes from config.openshiftLightspeed.model, not from a label:
+# MaaS lists models as publishers/<namespace>/models/<name>, and a slash is
+# not allowed in a label value. It has no default, because it cannot be
+# discovered from a template (only the gateway's own model listing knows it)
+# and a wrong value gives an assistant that errors on every question. A
+# missing model fails the policy by name rather than rendering an empty one.
 #
 # The Secret itself is created out of band by an administrator and is never
 # in git. Mint a MaaS API key, then:
@@ -21,23 +29,28 @@
 #     --from-literal=apitoken=<key>
 #
 # MaaS keys expire. Lightspeed has no rotation of its own, so use a long TTL
-# and re-create the Secret before it lapses. Upstream work that would remove
-# this entirely is tracked as UIERFE-5, which adds OAuth2 client-credentials
-# token refresh to the vLLM provider.
-apiVersion: ols.openshift.io/v1alpha1
-kind: OLSConfig
-metadata:
-  name: cluster
-spec:
-  llm:
-    providers:
-      - name: maas
-        type: rhoai_vllm
-        url: '{{ printf "https://maas.%s/v1" (lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default").spec.domain }}'
-        credentialsSecretRef:
-          name: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-secret" | default "maas-api-key" hub}}'
-        models:
-          - name: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-model" hub}}'
-  ols:
-    defaultProvider: maas
-    defaultModel: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-lightspeed-model" hub}}'
+# and re-create the Secret before it lapses.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "openshiftLightspeed" | default dict) hub}}
+  {{hub- $model := (dig "model" "" $cfg) hub}}
+  {{hub- if not $model hub}}{{hub fail "openshift-lightspeed: config.openshiftLightspeed.model is required; set it to a model id the MaaS gateway lists" hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: ols.openshift.io/v1alpha1
+      kind: OLSConfig
+      metadata:
+        name: cluster
+      spec:
+        llm:
+          providers:
+            - name: maas
+              type: rhoai_vllm
+              url: '{{ printf "https://maas.%s/v1" (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}'
+              credentialsSecretRef:
+                name: {{hub (dig "secretName" "maas-api-key" $cfg) | quote hub}}
+              models:
+                - name: {{hub $model | quote hub}}
+        ols:
+          defaultProvider: maas
+          defaultModel: {{hub $model | quote hub}}

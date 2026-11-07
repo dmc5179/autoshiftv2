@@ -190,6 +190,21 @@ hubClusterSets:
             # Required for OpenShift Lightspeed or any agentic client.
             toolCallParser: 'granite4'
       # =======================================================================
+      # openshift-lightspeed — the model the console assistant uses (DATA; the ENABLE flag is
+      # the openshift-lightspeed label below). The provider is the MaaS gateway on the same
+      # cluster, discovered from the cluster ingress domain.
+      # =======================================================================
+      openshiftLightspeed:
+        # Required. A model id the MaaS gateway lists (GET /maas-api/v1/models), in the form
+        # publishers/<namespace>/models/<name>. This one matches the openshiftAiModels example
+        # above; it is an example, not a default.
+        model: 'publishers/llm/models/granite-4-tiny-gpu'
+        # Secret in openshift-lightspeed holding a MaaS API key, created out of band by an
+        # administrator; credentials never come from git. The key inside is always 'apitoken':
+        #   oc create secret generic maas-api-key -n openshift-lightspeed \
+        #     --from-literal=apitoken=<key>
+        secretName: 'maas-api-key'               # default: maas-api-key
+      # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).
       # =======================================================================
@@ -2281,20 +2296,8 @@ hubClusterSets:
       openshift-lightspeed-source: redhat-operators
       openshift-lightspeed-source-namespace: openshift-marketplace
       openshift-lightspeed-version: ''
-      # The model id the gateway advertises, e.g.
-      # 'publishers/llm/models/granite-4-tiny-gpu'. No default: it cannot be
-      # discovered from a template (only the gateway's own model listing knows
-      # it), and a wrong value gives an assistant that errors on every
-      # question, so an unset label should fail visibly rather than guess.
-      openshift-lightspeed-model: ''
-      # Secret holding the MaaS API key, created out of band by an
-      # administrator - credentials never come from git:
-      #   oc create secret generic maas-api-key -n openshift-lightspeed \
-      #     --from-literal=apitoken=<key>
-      # The key inside the Secret is always 'apitoken', whatever the provider
-      # calls it.
-      openshift-lightspeed-secret: maas-api-key
-
+      # The model and the API key Secret are config.openshiftLightspeed, not
+      # labels: a MaaS model id contains slashes, which a label value cannot.
 
       # =======================================================================
       # Mcp Gateway
