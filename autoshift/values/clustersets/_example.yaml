@@ -51,32 +51,9 @@ hubClusterSets:
   hub:  # ← CHANGE 2: replace with your clusterset name
     config:
       # =======================================================================
-      # model-egress — deny the cloud metadata endpoint to model namespaces
+      # htpasswd-users — password users, their Groups and role bindings (DATA; the ENABLE
+      # flag is the htpasswd-users label below).
       # =======================================================================
-      # DATA; the ENABLE flag is the model-egress label below.
-      #
-      # Deliberately narrow for now: one AdminNetworkPolicy denying
-      # 169.254.169.254 to every listed namespace, plus an explicit DNS allow.
-      # Default-deny egress, FQDN allowlisting via EgressFirewall, and ACL audit
-      # logging are tracked separately — each is valuable and each can take a
-      # working cluster down if a rule is wrong.
-      # =======================================================================
-      # DATA; the ENABLE flag is the gitops-workloads label below.
-      #
-      # One entry per workload that lives in its own repository. AutoShift
-      # creates the ArgoCD Application; the manifests stay where their owners
-      # work. Adding a workload is a change here, not a new policy directory.
-      #
-      # Required per entry: name, repoUrl, path, destinationNamespace. An entry
-      # missing any of them is skipped entirely rather than producing a
-      # half-populated Application.
-      #
-      # Secrets are NOT deployed by this. A workload needing credentials - an
-      # API key, a CA bundle - gets them out of band, the same way the MaaS
-      # database URL and the Lightspeed key do.
-      # =======================================================================
-      # DATA; the ENABLE flag is the htpasswd-users label below.
-      #
       # Users who log in with a password, and the Groups they belong to. A MaaS
       # subscription is owned by Groups, so this is how a person - rather than
       # kubeadmin or a ServiceAccount - gets to mint an API key: put them in a
@@ -98,6 +75,21 @@ hubClusterSets:
               - namespace: llm
                 role: view
 
+      # =======================================================================
+      # gitops-workloads — workloads deployed from their own repositories (DATA; the ENABLE
+      # flag is the gitops-workloads label below).
+      # =======================================================================
+      # One entry per workload that lives in its own repository. AutoShift
+      # creates the ArgoCD Application; the manifests stay where their owners
+      # work. Adding a workload is a change here, not a new policy directory.
+      #
+      # Required per entry: name, repoUrl, path, destinationNamespace. An entry
+      # missing any of them is skipped entirely rather than producing a
+      # half-populated Application.
+      #
+      # Secrets are NOT deployed by this. A workload needing credentials - an
+      # API key, a CA bundle - gets them out of band, the same way the MaaS
+      # database URL and the Lightspeed key do.
       gitopsWorkloads:
         # Shared default; each entry may override it.
         gitopsNamespace: openshift-gitops
@@ -117,20 +109,25 @@ hubClusterSets:
             selfHeal: true
             project: default
 
-      # Denies the cloud metadata endpoint to the listed namespaces. That is the
-      # whole of what model-egress ships today; default-deny and FQDN allowlists
-      # are not implemented. The ENABLE flag is the model-egress label.
+      # =======================================================================
+      # model-egress — deny the cloud metadata endpoint to model namespaces (DATA; the ENABLE
+      # flag is the model-egress label below).
+      # =======================================================================
+      # Denies 169.254.169.254 and fd00:ec2::254 to the listed namespaces, plus an explicit
+      # DNS allow. That is the whole of what model-egress ships: default-deny egress, FQDN
+      # allowlists and ACL audit logging are not implemented.
       modelEgress:
         baseline:
           priority: 50                # AdminNetworkPolicy priority; lower wins
         # Required. Namespaces to fence; 'llm' is an example. Each is labeled
         # autoshift.io/ai-workload, which is what the AdminNetworkPolicy selects
-        # on. Do NOT list
-        # models-as-a-service or redhat-ai-gateway-infra: maas-api, Limitador and
-        # Authorino make outbound calls, and breaking them presents as a 403 or
-        # 504 at the gateway rather than as anything network-shaped.
+        # on. Do NOT list models-as-a-service or redhat-ai-gateway-infra:
+        # maas-api, Limitador and Authorino make outbound calls, and breaking
+        # them presents as a 403 or 504 at the gateway rather than as anything
+        # network-shaped.
         namespaces:
           - 'llm'
+
       # =======================================================================
       # openshift-ai-models — which models this cluster serves (DATA; the ENABLE flag is the
       # openshift-ai-models label below). A model is a structured record, not a string, so it
@@ -189,6 +186,7 @@ hubClusterSets:
             # chatTemplate). Gemma has no parser and cannot do tool calling.
             # Required for OpenShift Lightspeed or any agentic client.
             toolCallParser: 'granite4'
+
       # =======================================================================
       # openshift-lightspeed — the model the console assistant uses (DATA; the ENABLE flag is
       # the openshift-lightspeed label below). The provider is the MaaS gateway on the same
@@ -204,6 +202,7 @@ hubClusterSets:
         #   oc create secret generic maas-api-key -n openshift-lightspeed \
         #     --from-literal=apitoken=<key>
         secretName: 'maas-api-key'               # default: maas-api-key
+
       # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).
