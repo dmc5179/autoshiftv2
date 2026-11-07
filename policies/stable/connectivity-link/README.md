@@ -1,134 +1,94 @@
-# connectivity-link AutoShift Policy
+# connectivity-link
 
-## Overview
-Installs the rhcl-operator operator by using AutoShift's ACM **PolicyGenerator** pattern. The
-directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
-`manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
+Installs Red Hat Connectivity Link and creates the Kuadrant stack it manages: Authorino for
+authentication and authorization, and Limitador for rate limiting. Models-as-a-Service in Red Hat
+OpenShift AI enforces API keys through Authorino and quotas through Limitador, so a MaaS gateway
+never programs without this stack.
 
-## Layout
-```
-connectivity-link/
-  kustomization.yaml            # entrypoint: generators: [policy-generator-config.yaml]
-  policy-generator-config.yaml  # the PolicyGenerator (policy graph, remediation, eval interval)
-  placement.yaml                # Placement predicate (autoshift.io/connectivity-link) + tolerations
-  manifests/
-    operator-install/
-      kustomization.yaml        # renders the shared components/operator-install chart (Namespace +
-                                #   OperatorPolicy); per-operator ACM lookups are visible here
-```
-The operator-install renders the shared `components/operator-install` chart — edit the visible ACM
-lookups in `manifests/operator-install/kustomization.yaml` to tune the subscription/version. Add
-further CRs as new `policies[]` entries in `policy-generator-config.yaml` pointing at their own dirs.
+## Policies
 
-## Test Locally
-```bash
-# Render the policy exactly as the CMP/CI does (needs: make install-policy-generator)
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/connectivity-link
+| Policy | Mode | What it does |
+|---|---|---|
+| `policy-rhcl-operator-install` | enforce | The `rhcl-operator` subscription, in `openshift-operators` |
+| `policy-rhcl-kuadrant` | enforce | The `kuadrant-system` namespace, the `Kuadrant` and the cluster-wide `Authorino`. Waits for the Operator |
+| `policy-rhcl-ready` | inform | `Kuadrant` reports `Ready` |
+| `policy-rhcl-authorino-cert` | enforce | Annotates the Authorino Service so service-ca issues its serving certificate. Waits for `policy-rhcl-ready` |
+| `policy-rhcl-authorino-cert-ready` | inform | The `authorino-server-cert` Secret exists |
 
-# Full validation (helm render + hub/spoke template resolution + label contract)
-cd tools && go test -tags integration -count=1 ./internal/resolver/...
-```
-The `${POLICY_NAMESPACE}`, `${REMEDIATION}`, `${EVAL_COMPLIANT}`, `${EVAL_NONCOMPLIANT}` tokens are
-substituted per-deployment by the repo-server CMP before `kustomize build` runs; leave them as-is.
+`rhcl` abbreviates the policy names to stay within the 40-character limit.
 
-## Enable on Clusters
-Labels are defined in values files only — never directly on managed clusters. The cluster-labels
-policy propagates them, and this policy's `placement.yaml` selects clusters with
-`autoshift.io/connectivity-link: 'true'`.
+## Enabling
 
 ```yaml
-# In autoshift/values/clustersets/hub.yaml (or another clusterset / per-cluster file)
 hubClusterSets:
   hub:
     labels:
       connectivity-link: 'true'
-      connectivity-link-subscription-name: 'rhcl-operator'
-      connectivity-link-channel: 'stable'
-      connectivity-link-source: 'redhat-operators'
-      connectivity-link-source-namespace: 'openshift-marketplace'
-      # connectivity-link-version: 'rhcl-operator.v1.x.x'  # Optional: pin to a specific CSV
+      connectivity-link-subscription-name: rhcl-operator
+      connectivity-link-channel: stable
+      connectivity-link-source: redhat-operators
+      connectivity-link-source-namespace: openshift-marketplace
+      # connectivity-link-version: 'rhcl-operator.v1.x.y'   # optional CSV pin
 ```
-`generate-operator-policy.sh --add-to-autoshift` adds these for you (and to `_example*.yaml`, which
-the label-contract CI requires for every consumed `autoshift.io/*` key).
 
-The ApplicationSet auto-discovers new directories under `policies/stable/*` (and `certified`/
-`community`) — no manual registration required.
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
-## Version Control
-- **Automatic upgrades** within the channel by default.
-- **Pin a version** with the `connectivity-link-version` label — a pinned version sets a manual
-  install plan (`startingCSV` + `versions`), so upgrades become explicit.
+## The Kuadrant stack
+
+The subscription installs the Operator into `openshift-operators`. The components that enforce
+anything run from `kuadrant-system`, and exist only once the `Kuadrant` and `Authorino` custom
+resources do.
+
+- `Kuadrant` enables observability, so the Operator creates the Limitador and Authorino monitors
+  that user workload monitoring scrapes. MaaS usage metrics depend on them.
+- `Authorino` is cluster-wide, because MaaS authorizes requests for every model namespace through
+  one instance.
+- `policy-rhcl-ready` matters because MaaS waits for `Kuadrant` to be `Ready`. Without this check
+  the failure surfaces much later, as a MaaS Gateway that never programs, with nothing pointing back
+  here.
+
+## Authorino TLS, and the deadlock it avoids
+
+MaaS talks to Authorino over TLS, with a serving certificate from OpenShift's service-ca operator.
+The pieces are circular:
+
+1. Authorino will not start with TLS enabled until its certificate Secret exists.
+2. service-ca issues the certificate when the Authorino Service is annotated.
+3. The Authorino Operator creates that Service only once Authorino starts.
+
+Requesting TLS in the initial `Authorino` therefore guarantees it never starts, and leaves no
+Service to annotate. `Kuadrant` then reports:
+
+```
+Ready=False AuthorinoNotReady: listener secret name authorino-server-cert not found
+```
+
+This policy drives `spec.listener.tls.enabled` from a managed-cluster lookup of the Secret, so the
+sequence runs itself: Authorino starts with TLS off, its Service appears,
+`policy-rhcl-authorino-cert` annotates it, service-ca issues the Secret, and the next evaluation
+turns TLS on. Three details make this the only arrangement that converges:
+
+- `spec.listener.tls` is a required field, so it cannot be left to the Operator's default.
+- `musthave` merges, so removing the field from a manifest would not remove it from a cluster that
+  already has it. Only driving the value converges.
+- Only one enforcing policy can own the field. Two policies writing it would fight on every
+  evaluation.
+
+The certificate comes from service-ca, not from cert-manager, as in the Red Hat procedure for MaaS:
+the Envoy-to-Authorino connection is trusted through the cluster's internal CA bundle.
+
+## Alongside the MCP gateway
+
+The MCP gateway Operator, installed by the [mcp-gateway](../mcp-gateway/README.md) policy, requires
+its own Red Hat Connectivity Link version as an OLM dependency. With both policies enabled, both
+have an opinion about which version is installed. Check that the channel here satisfies the MCP
+gateway's requirement.
+
+## Verifying
+
 ```bash
-# Find available CSV versions
-oc get packagemanifests rhcl-operator -o jsonpath='{.status.channels[*].currentCSV}'
+oc get kuadrant kuadrant -n kuadrant-system -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+oc get authorino authorino -n kuadrant-system -o jsonpath='{.spec.listener.tls.enabled}{"\n"}'
+oc get secret authorino-server-cert -n kuadrant-system
+oc get pods -n kuadrant-system
 ```
-
-## Adding Configuration (operator CRs)
-After the operator installs, add its Custom Resources as **bare manifests** — do NOT hand-write a
-ConfigurationPolicy wrapper; PolicyGenerator generates it.
-
-1. Explore the CRDs the operator installed:
-   ```bash
-   oc get pods -n openshift-operators
-   oc get crds | grep connectivity-link
-   oc explain <CustomResourceName>
-   ```
-2. For a **static** CR, drop a bare manifest into `manifests/`:
-   ```yaml
-   # manifests/connectivity-link-config.yaml
-   apiVersion: <operator apiVersion>
-   kind: <CustomResource>
-   metadata:
-     name: connectivity-link-config
-     namespace: openshift-operators
-   spec:
-     setting: value
-   ```
-3. For a CR that needs **hub templates / loops / conditionals**, use a bare `object-templates-raw`
-   manifest instead (PG still wraps it into one ConfigurationPolicy; `complianceType` lives inside):
-   ```yaml
-   # manifests/connectivity-link-config.yaml
-   object-templates-raw: |
-     - complianceType: musthave
-       objectDefinition:
-         apiVersion: <operator apiVersion>
-         kind: <CustomResource>
-         metadata:
-           name: connectivity-link-config
-           namespace: openshift-operators
-         spec:
-           setting: '{{hub index .ManagedClusterLabels "autoshift.io/connectivity-link-setting" | default "default-value" hub}}'
-   ```
-4. If the config must be its **own** Policy (separate remediation, a dependency, or a different
-   predicate), add a `policies[]` entry in `policy-generator-config.yaml` (with `dependencies:` on
-   `policy-connectivity-link-operator-install`) and point it at the new manifest with its own
-   `placement.placementPath`. `generate-policy.sh --dir policies/stable/connectivity-link` scaffolds this.
-
-Document any new `autoshift.io/connectivity-link-*` label in `autoshift/values/clustersets/_example.yaml`
-or the label-contract CI (`go test -tags integration`) fails with `Missing`.
-
-### Readiness / status checks
-A status assertion (e.g. CSV `phase: Succeeded`) can only be observed, so give it its own
-`policies[]` entry with `remediationAction: inform` — never fold an inform check into an enforce
-manifest (ACM's root action would clobber it).
-
-## Reference Examples
-- **Simple operator**: `policies/stable/cert-manager/` — bare Namespace + OperatorPolicy (this shape)
-- **Multiple related policies / placements**: `policies/stable/advanced-cluster-security/`
-- **Multiple config types**: `policies/stable/metallb/`
-- **Storage cluster config**: `policies/stable/openshift-data-foundation/`
-
-## Troubleshooting
-- **Policy not applied**: `oc get managedcluster <cluster> --show-labels`; check the Placement
-  (`oc get placement -n policies-autoshift`) and `oc describe policy policy-connectivity-link-operator-install`.
-- **Operator install issues**: `oc get subscription,installplan -n openshift-operators`;
-  `oc get catalogsource -n openshift-marketplace`.
-- **Render issues**: run the `kustomize build` above; hub templates use bare `{{hub … hub}}`
-  delimiters (no Helm `{{ "{{hub" }}` escaping in PolicyGenerator manifests).
-
-## Resources
-- [Operator Documentation](https://operatorhub.io/operator/rhcl-operator)
-- [AutoShift Developer Guide](../../../docs/developer-guide.md)
-- [ACM PolicyGenerator](https://github.com/open-cluster-management-io/policy-generator-plugin)
