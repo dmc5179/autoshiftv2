@@ -249,3 +249,9 @@ clusters:
       opentelemetry-channel: stable
       opentelemetry-source: redhat-operators
       opentelemetry-source-namespace: openshift-marketplace
+
+      # =======================================================================
+      # Model Egress
+      # =======================================================================
+      # Needs config.modelEgress.namespaces to say which namespaces it fences.
+      model-egress: 'false'

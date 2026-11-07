@@ -1,0 +1,23 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-model-egress
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # No cluster-type predicate. The scaffolder emits cluster-type: spoke, which
+  # never matches a self-managed hub, and the policy then has no status at all
+  # rather than reporting a failure. The enablement label is the only gate,
+  # matching openshift-ai, connectivity-link and openshift-ai-models.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/model-egress'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

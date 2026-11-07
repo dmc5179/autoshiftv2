@@ -1,0 +1,39 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: model-egress
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed)
+# BEFORE `kustomize build` runs. They live here and in placement.yaml — never in
+# manifests/, whose hub templates contain `$vars` that substitution would clobber.
+# The manifests read the policy namespace from .PolicyMetadata.namespace instead.
+#
+# Which namespaces are fenced, and what each may reach, comes from
+# config.modelEgress in the cluster's rendered-config rather than from labels: an
+# egress rule is a structured record, and a label is a string.
+#
+# One policy today, but placementBindingDefaults is set now rather than later:
+# the deferred egress layers all bind to this same placement, and PolicyGenerator
+# refuses to render the moment a second policy shares it without an explicit name.
+placementBindingDefaults:
+  name: binding-policy-model-egress
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: high
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - SC System and Communications Protection
+  controls:
+    - SC-7 Boundary Protection
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-model-egress-baseline
+    manifests:
+      - path: manifests/baseline

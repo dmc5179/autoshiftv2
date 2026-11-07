@@ -51,6 +51,25 @@ hubClusterSets:
   hub:  # ← CHANGE 2: replace with your clusterset name
     config:
       # =======================================================================
+      # model-egress — deny the cloud metadata endpoint to model namespaces (DATA; the ENABLE
+      # flag is the model-egress label below).
+      # =======================================================================
+      # Denies 169.254.169.254 and fd00:ec2::254 to the listed namespaces, plus an explicit
+      # DNS allow. That is the whole of what model-egress ships: default-deny egress, FQDN
+      # allowlists and ACL audit logging are not implemented.
+      modelEgress:
+        baseline:
+          priority: 50                # AdminNetworkPolicy priority; lower wins
+        # Required. Namespaces to fence; 'llm' is an example. Each is labeled
+        # autoshift.io/ai-workload, which is what the AdminNetworkPolicy selects
+        # on. Do NOT list models-as-a-service or redhat-ai-gateway-infra:
+        # maas-api, Limitador and Authorino make outbound calls, and breaking
+        # them presents as a 403 or 504 at the gateway rather than as anything
+        # network-shaped.
+        namespaces:
+          - 'llm'
+
+      # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
       # cert-manager, cert-manager-ca, cert-manager-api-cert, cert-manager-ingress-cert).
       # =======================================================================
@@ -2350,3 +2369,12 @@ hubClusterSets:
       # only until config.ztwim.defaultX509Validity expires. policy-ztwim-operand-drift reports
       # when this is needed and stays Compliant when it is not.
       ztwim-operand-reconcile: 'false'
+
+      # =======================================================================
+      # Model Egress
+      # =======================================================================
+      # Denies the cloud metadata endpoint (169.254.169.254, fd00:ec2::254) to
+      # model and agent namespaces, so a prompt-injected model cannot read the
+      # node's instance credentials. Nothing else is blocked. Needs
+      # config.modelEgress.namespaces above to say which namespaces it fences.
+      model-egress: 'false'

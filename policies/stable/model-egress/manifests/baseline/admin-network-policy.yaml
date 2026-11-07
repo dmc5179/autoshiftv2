@@ -1,0 +1,84 @@
+# Deny the cloud metadata endpoint to model and agent namespaces.
+#
+# This is the highest-value egress rule for the least operational risk, which is
+# why it ships on its own ahead of the rest. A model that can reach
+# 169.254.169.254 can read the node's instance credentials — on AWS that is a
+# direct path from prompt injection to the cloud account. Denying one link-local
+# address breaks nothing else: no legitimate workload in a model namespace has
+# any reason to call it.
+#
+# Deliberately narrow. A default-deny egress posture with an allowlist, an
+# EgressFirewall for FQDN rules, and ACL audit logging are all worthwhile and all
+# able to take a working cluster down if a rule is wrong. They are tracked
+# separately rather than bundled in here.
+#
+# The deny rule is listed first on purpose: AdminNetworkPolicy evaluates rules in
+# order within a policy, and a lower priority value wins between policies.
+#
+# DNS is explicitly allowed alongside. An AdminNetworkPolicy with only a Deny
+# rule leaves other traffic to the cluster default (allow), so the DNS rule is
+# not strictly required today — it is here so that adding a later default-deny
+# layer cannot silently break name resolution, which presents as a broken model
+# rather than as a network problem.
+#
+# Fails, rather than rendering nothing, when config.modelEgress.namespaces is missing or empty: an
+# AdminNetworkPolicy that selects no namespace protects nothing while reporting Compliant. It also
+# fails when the rendered-config ConfigMap is missing. The enablement label is the only switch.
+#
+# v1alpha1 is the only version OpenShift 4.22 serves for this kind. ANP has no
+# FQDN peer; hostname rules need EgressFirewall, which is part of the deferred
+# work.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "modelEgress" | default dict) hub}}
+  {{hub- $namespaces := (dig "namespaces" (list) $cfg) hub}}
+  {{hub- if not $namespaces hub}}
+  {{hub- fail "model-egress: config.modelEgress.namespaces is missing or empty; list the namespaces to fence" hub}}
+  {{hub- end hub}}
+  {{hub- $base := (dig "baseline" (dict) $cfg) hub}}
+  {{hub- range $ns := $namespaces hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: {{hub $ns hub}}
+        labels:
+          autoshift.io/ai-workload: 'true'
+  {{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy.networking.k8s.io/v1alpha1
+      kind: AdminNetworkPolicy
+      metadata:
+        name: ai-workload-egress-baseline
+      spec:
+        # From typed YAML config, so this is already an int. Never source a
+        # numeric field from a ManagedCluster label: toInt on a quoted
+        # hub-resolved value fails resolution outright, and surfaces only as a
+        # policy that applies nothing while reporting Compliant.
+        priority: {{hub (dig "priority" 50 $base) hub}}
+        subject:
+          namespaces:
+            matchLabels:
+              autoshift.io/ai-workload: 'true'
+        egress:
+          - name: deny-cloud-metadata
+            action: Deny
+            to:
+              - networks:
+                  - 169.254.169.254/32
+                  - fd00:ec2::254/128
+          - name: allow-cluster-dns
+            action: Allow
+            to:
+              - namespaces:
+                  matchLabels:
+                    kubernetes.io/metadata.name: openshift-dns
+            ports:
+              - portNumber:
+                  protocol: UDP
+                  port: 5353
+              - portNumber:
+                  protocol: TCP
+                  port: 5353
