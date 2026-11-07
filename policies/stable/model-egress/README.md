@@ -26,16 +26,23 @@ is why it ships alone rather than as part of a broader egress posture.
 config:
   modelEgress:
     baseline:
-      enabled: true
       priority: 50
     namespaces:
       - 'llm'
 ```
 
-Enable with `autoshift.io/model-egress: 'true'`.
+Enable with `autoshift.io/model-egress: 'true'`. The label is the only switch.
 
-Each listed namespace is labeled `autoshift.io/ai-workload`, which is what the
-`AdminNetworkPolicy` selects on.
+| Key | Default | Notes |
+|---|---|---|
+| `namespaces` | | required. Each is labeled `autoshift.io/ai-workload`, which the `AdminNetworkPolicy` selects on |
+| `baseline.priority` | `50` | `AdminNetworkPolicy` priority; a lower value wins between policies |
+
+The `llm` namespace in the sample is an example; list the namespaces your models and agents run in.
+
+The policy fails, and says so, when `namespaces` is missing or empty, because an
+`AdminNetworkPolicy` that selects no namespace protects nothing while reporting Compliant. It also
+fails when the cluster's rendered-config ConfigMap is missing.
 
 **Do not list `models-as-a-service` or `redhat-ai-gateway-infra`.** maas-api,
 Limitador and Authorino all make outbound calls, and breaking them surfaces as a

@@ -115,12 +115,15 @@ hubClusterSets:
             selfHeal: true
             project: default
 
+      # Denies the cloud metadata endpoint to the listed namespaces. That is the
+      # whole of what model-egress ships today; default-deny and FQDN allowlists
+      # are not implemented. The ENABLE flag is the model-egress label.
       modelEgress:
         baseline:
-          enabled: true
-          priority: 50
-        # Namespaces to fence. Each is labelled autoshift.io/ai-workload, which is
-        # what the AdminNetworkPolicy selects on. Do NOT list
+          priority: 50                # AdminNetworkPolicy priority; lower wins
+        # Required. Namespaces to fence; 'llm' is an example. Each is labeled
+        # autoshift.io/ai-workload, which is what the AdminNetworkPolicy selects
+        # on. Do NOT list
         # models-as-a-service or redhat-ai-gateway-infra: maas-api, Limitador and
         # Authorino make outbound calls, and breaking them presents as a 403 or
         # 504 at the gateway rather than as anything network-shaped.
@@ -2138,10 +2141,10 @@ hubClusterSets:
       # =======================================================================
       # Model Egress
       # =======================================================================
-      # Default-deny egress for model and agent namespaces, with an FQDN
-      # allowlist. Off by default: this is the one policy here most able to take
-      # a working cluster down, and it needs config.modelEgress above to say
-      # which namespaces it governs.
+      # Denies the cloud metadata endpoint (169.254.169.254, fd00:ec2::254) to
+      # model and agent namespaces, so a prompt-injected model cannot read the
+      # node's instance credentials. Nothing else is blocked. Needs
+      # config.modelEgress.namespaces above to say which namespaces it fences.
       model-egress: 'false'
 
       # =======================================================================

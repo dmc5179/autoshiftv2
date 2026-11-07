@@ -21,16 +21,22 @@
 # layer cannot silently break name resolution, which presents as a broken model
 # rather than as a network problem.
 #
+# Fails, rather than rendering nothing, when config.modelEgress.namespaces is missing or empty: an
+# AdminNetworkPolicy that selects no namespace protects nothing while reporting Compliant. It also
+# fails when the rendered-config ConfigMap is missing. The enablement label is the only switch.
+#
 # v1alpha1 is the only version OpenShift 4.22 serves for this kind. ANP has no
 # FQDN peer; hostname rules need EgressFirewall, which is part of the deferred
 # work.
 object-templates-raw: |
-  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
-  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
-  {{hub- $cfg := (dig "modelEgress" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "modelEgress" | default dict) hub}}
+  {{hub- $namespaces := (dig "namespaces" (list) $cfg) hub}}
+  {{hub- if not $namespaces hub}}
+  {{hub- fail "model-egress: config.modelEgress.namespaces is missing or empty; list the namespaces to fence" hub}}
+  {{hub- end hub}}
   {{hub- $base := (dig "baseline" (dict) $cfg) hub}}
-  {{hub- if (dig "enabled" false $base) hub}}
-  {{hub- range $ns := (dig "namespaces" (list) $cfg) hub}}
+  {{hub- range $ns := $namespaces hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: v1
@@ -76,4 +82,3 @@ object-templates-raw: |
               - portNumber:
                   protocol: TCP
                   port: 5353
-  {{hub- end hub}}
