@@ -1,134 +1,91 @@
-# nvidia-gpu-operator AutoShift Policy
+# nvidia-gpu-operator
 
-## Overview
-Installs the gpu-operator-certified operator by using AutoShift's ACM **PolicyGenerator** pattern. The
-directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
-`manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
+Installs the NVIDIA GPU Operator from the certified catalog and creates its `ClusterPolicy`, which
+builds and loads the driver and makes each GPU node advertise `nvidia.com/gpu` capacity. The
+directory is under `policies/certified/` because the Operator ships in `certified-operators`.
 
-## Layout
-```
-nvidia-gpu-operator/
-  kustomization.yaml            # entrypoint: generators: [policy-generator-config.yaml]
-  policy-generator-config.yaml  # the PolicyGenerator (policy graph, remediation, eval interval)
-  placement.yaml                # Placement predicate (autoshift.io/nvidia-gpu-operator) + tolerations
-  manifests/
-    operator-install/
-      kustomization.yaml        # renders the shared components/operator-install chart (Namespace +
-                                #   OperatorPolicy); per-operator ACM lookups are visible here
-```
-The operator-install renders the shared `components/operator-install` chart — edit the visible ACM
-lookups in `manifests/operator-install/kustomization.yaml` to tune the subscription/version. Add
-further CRs as new `policies[]` entries in `policy-generator-config.yaml` pointing at their own dirs.
+## Policies
 
-## Test Locally
-```bash
-# Render the policy exactly as the CMP/CI does (needs: make install-policy-generator)
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/nvidia-gpu-operator
+| Policy | Mode | What it does |
+|---|---|---|
+| `policy-nvidia-gpu-operator-install` | enforce | The `nvidia-gpu-operator` namespace, an OwnNamespace OperatorGroup and the `gpu-operator-certified` subscription |
+| `policy-nvidia-gpu-cluster-policy` | enforce | `ClusterPolicy` `gpu-cluster-policy`: driver, container toolkit, device plugin, DCGM, GPU feature discovery. Waits for the Operator |
+| `policy-nvidia-gpu-ready` | inform | The `ClusterPolicy` reports `Ready` |
 
-# Full validation (helm render + hub/spoke template resolution + label contract)
-cd tools && go test -tags integration -count=1 ./internal/resolver/...
-```
-The `${POLICY_NAMESPACE}`, `${REMEDIATION}`, `${EVAL_COMPLIANT}`, `${EVAL_NONCOMPLIANT}` tokens are
-substituted per-deployment by the repo-server CMP before `kustomize build` runs; leave them as-is.
-
-## Enable on Clusters
-Labels are defined in values files only — never directly on managed clusters. The cluster-labels
-policy propagates them, and this policy's `placement.yaml` selects clusters with
-`autoshift.io/nvidia-gpu-operator: 'true'`.
+## Enabling
 
 ```yaml
-# In autoshift/values/clustersets/hub.yaml (or another clusterset / per-cluster file)
 hubClusterSets:
   hub:
     labels:
+      node-feature-discovery: 'true'
       nvidia-gpu-operator: 'true'
-      nvidia-gpu-operator-subscription-name: 'gpu-operator-certified'
-      nvidia-gpu-operator-channel: 'v25.3'
-      nvidia-gpu-operator-source: 'certified-operators'
-      nvidia-gpu-operator-source-namespace: 'openshift-marketplace'
-      # nvidia-gpu-operator-version: 'gpu-operator-certified.v1.x.x'  # Optional: pin to a specific CSV
+      nvidia-gpu-operator-subscription-name: gpu-operator-certified
+      nvidia-gpu-operator-channel: v25.3
+      nvidia-gpu-operator-source: certified-operators
+      nvidia-gpu-operator-source-namespace: openshift-marketplace
+      # nvidia-gpu-operator-version: 'gpu-operator-certified.v25.3.4'   # optional CSV pin
 ```
-`generate-operator-policy.sh --add-to-autoshift` adds these for you (and to `_example*.yaml`, which
-the label-contract CI requires for every consumed `autoshift.io/*` key).
 
-The ApplicationSet auto-discovers new directories under `policies/stable/*` (and `certified`/
-`community`) — no manual registration required.
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
-## Version Control
-- **Automatic upgrades** within the channel by default.
-- **Pin a version** with the `nvidia-gpu-operator-version` label — a pinned version sets a manual
-  install plan (`startingCSV` + `versions`), so upgrades become explicit.
+## Requires Node Feature Discovery
+
+The Operator selects GPU nodes by the Node Feature Discovery label
+`feature.node.kubernetes.io/pci-10de.present=true`. The
+[node-feature-discovery](../../stable/node-feature-discovery/README.md) policy produces it with its
+default configuration, which labels PCI devices by vendor. Enable both. A `workerConfig` override in
+`config.nodeFeatureDiscovery` that drops `deviceLabelFields: [vendor]` leaves the Operator with no
+nodes to manage and no error.
+
+## The ClusterPolicy matches the channel
+
+The API server rejects the whole `ClusterPolicy` on the first field its CRD does not define, with
+`strict decoding error: unknown field "spec.<x>"`. The policy then reports the resource as
+"missing, and cannot be created", which reads like a permissions or ordering problem rather than a
+schema mismatch. Every field in `manifests/cluster-policy/cluster-policy.yaml` exists in the CRD that
+the default channel, `v25.3`, installs. Five fields from newer releases are left out for that reason:
+`spec.cdi.nriPluginEnabled`, `spec.sandboxWorkloads.mode`, `spec.driver.licensingConfig.secretName`,
+`spec.mps` and `spec.kataSandboxDevicePlugin`.
+
+**When you change the channel, check the manifest against the new CRD**, for example with a
+server-side dry run:
+
 ```bash
-# Find available CSV versions
-oc get packagemanifests gpu-operator-certified -o jsonpath='{.status.channels[*].currentCSV}'
+oc apply --dry-run=server -f <rendered ClusterPolicy>
 ```
 
-## Adding Configuration (operator CRs)
-After the operator installs, add its Custom Resources as **bare manifests** — do NOT hand-write a
-ConfigurationPolicy wrapper; PolicyGenerator generates it.
+`operator.use_ocp_driver_toolkit: true` builds the driver against the running Red Hat Enterprise
+Linux CoreOS release rather than a pinned kernel, which is what lets it survive cluster upgrades.
 
-1. Explore the CRDs the operator installed:
-   ```bash
-   oc get pods -n nvidia-gpu-operator
-   oc get crds | grep nvidia-gpu-operator
-   oc explain <CustomResourceName>
-   ```
-2. For a **static** CR, drop a bare manifest into `manifests/`:
-   ```yaml
-   # manifests/nvidia-gpu-operator-config.yaml
-   apiVersion: <operator apiVersion>
-   kind: <CustomResource>
-   metadata:
-     name: nvidia-gpu-operator-config
-     namespace: nvidia-gpu-operator
-   spec:
-     setting: value
-   ```
-3. For a CR that needs **hub templates / loops / conditionals**, use a bare `object-templates-raw`
-   manifest instead (PG still wraps it into one ConfigurationPolicy; `complianceType` lives inside):
-   ```yaml
-   # manifests/nvidia-gpu-operator-config.yaml
-   object-templates-raw: |
-     - complianceType: musthave
-       objectDefinition:
-         apiVersion: <operator apiVersion>
-         kind: <CustomResource>
-         metadata:
-           name: nvidia-gpu-operator-config
-           namespace: nvidia-gpu-operator
-         spec:
-           setting: '{{hub index .ManagedClusterLabels "autoshift.io/nvidia-gpu-operator-setting" | default "default-value" hub}}'
-   ```
-4. If the config must be its **own** Policy (separate remediation, a dependency, or a different
-   predicate), add a `policies[]` entry in `policy-generator-config.yaml` (with `dependencies:` on
-   `policy-nvidia-gpu-operator-install`) and point it at the new manifest with its own
-   `placement.placementPath`. `generate-policy.sh --dir policies/stable/nvidia-gpu-operator` scaffolds this.
+## Install mode
 
-Document any new `autoshift.io/nvidia-gpu-operator-*` label in `autoshift/values/clustersets/_example.yaml`
-or the label-contract CI (`go test -tags integration`) fails with `Missing`.
+The Operator's CSV declares `OwnNamespace=True`, `SingleNamespace=True` and `AllNamespaces=False`.
+The shared operator-install chart defaults to an AllNamespaces OperatorGroup, which OLM refuses:
 
-### Readiness / status checks
-A status assertion (e.g. CSV `phase: Succeeded`) can only be observed, so give it its own
-`policies[]` entry with `remediationAction: inform` — never fold an inform check into an enforce
-manifest (ACM's root action would clobber it).
+```
+UnsupportedOperatorGroup: AllNamespaces InstallModeType not supported,
+cannot configure to watch all namespaces
+```
 
-## Reference Examples
-- **Simple operator**: `policies/stable/cert-manager/` — bare Namespace + OperatorPolicy (this shape)
-- **Multiple related policies / placements**: `policies/stable/advanced-cluster-security/`
-- **Multiple config types**: `policies/stable/metallb/`
-- **Storage cluster config**: `policies/stable/openshift-data-foundation/`
+The CSV then never leaves `Failed`, while the policy reports only that the CSV was not found. This
+policy sets `targetNamespaces: [nvidia-gpu-operator]`.
 
-## Troubleshooting
-- **Policy not applied**: `oc get managedcluster <cluster> --show-labels`; check the Placement
-  (`oc get placement -n policies-autoshift`) and `oc describe policy policy-nvidia-gpu-operator-install`.
-- **Operator install issues**: `oc get subscription,installplan -n nvidia-gpu-operator`;
-  `oc get catalogsource -n openshift-marketplace`.
-- **Render issues**: run the `kustomize build` above; hub templates use bare `{{hub … hub}}`
-  delimiters (no Helm `{{ "{{hub" }}` escaping in PolicyGenerator manifests).
+## A GPU node without a driver looks healthy
 
-## Resources
-- [Operator Documentation](https://operatorhub.io/operator/gpu-operator-certified)
-- [AutoShift Developer Guide](../../../docs/developer-guide.md)
-- [ACM PolicyGenerator](https://github.com/open-cluster-management-io/policy-generator-plugin)
+Until the driver stack finishes, which takes about 15 minutes on a new node, the node is `Ready` and
+schedulable and reports no `nvidia.com/gpu` capacity, so GPU workloads stay `Pending` with no
+obvious cause. `policy-nvidia-gpu-ready` asserts the `ClusterPolicy` `Ready` condition, which spans
+the whole stack and names the component that is stuck.
+
+GPU nodes themselves come from the cluster. On AWS, the [gpu-nodes](../../stable/gpu-nodes/README.md)
+policy creates GPU MachineSets.
+
+## Verifying
+
+```bash
+oc get csv -n nvidia-gpu-operator
+oc get clusterpolicy gpu-cluster-policy -o jsonpath='{.status.state}{"\n"}'
+oc get pods -n nvidia-gpu-operator
+oc get nodes -L feature.node.kubernetes.io/pci-10de.present
+```
