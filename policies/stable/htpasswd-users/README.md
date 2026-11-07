@@ -32,16 +32,24 @@ config:
 |---|---|---|
 | `providerName` | `htpasswd` | Do not change in place; see below |
 | `secretName` | `htpasswd-users` | Do not change in place; see below |
-| `groups[].name` | — | required; entries without one are skipped |
+| `groups` | `[]` | optional; with none, the policy adds only the identity provider |
+| `groups[].name` | | required |
 | `groups[].users` | `[]` | user names, matching the names in the htpasswd file |
 | `groups[].clusterRoles` | `[]` | |
-| `groups[].namespaceRoles` | `[]` | each needs `namespace` and `role` |
+| `groups[].namespaceRoles` | `[]` | each entry needs both `namespace` and `role` |
+
+The sample group, user and namespace are examples. Use your own.
+
+The policy fails, and names the problem, when `config.htpasswdUsers` is missing, when a group has
+no `name`, or when a `namespaceRoles` entry lacks `namespace` or `role`. It also fails when the
+cluster's rendered-config ConfigMap is missing, rather than applying defaults to a cluster whose
+configuration never arrived.
 
 ## The password never comes from Git
 
 The htpasswd Secret holds password hashes, which do not belong in a
-repository even hashed. It is created out of band, the same way the MaaS
-database URL and the Lightspeed API key are:
+repository even hashed. It is created out of band, with the htpasswd file
+under the key `htpasswd`:
 
 ```bash
 htpasswd -c -B -b users.htpasswd maas-user '<password>'

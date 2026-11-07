@@ -7,6 +7,10 @@
 # Removing a user from a group does NOT revoke MaaS API keys they already minted. Per the RHOAI 3.5
 # Models-as-a-Service documentation, keys must be revoked by hand when a user leaves a group.
 #
+# Fails, rather than rendering nothing, when config.htpasswdUsers is missing, when a group has no
+# name, or when a namespaceRoles entry lacks a namespace or a role. Groups themselves are optional:
+# with none, the policy adds only the identity provider.
+#
 # RBAC is opt-in per group and deliberately absent by default. Minting a MaaS API key needs no
 # Kubernetes RBAC at all: MaaS checks only that the caller's groups appear in the subscription's
 # owner.groups and the auth policy's subjects.groups. Bind roles here only for what a person
@@ -16,12 +20,16 @@
 # openshift-ai-models) reports NonCompliant until that namespace appears, then reconciles on its
 # own. It is not an error worth acting on.
 object-templates-raw: |
-  {{hub- $policyNs := .PolicyMetadata.namespace hub}}
-  {{hub- $rcm := (lookup "v1" "ConfigMap" $policyNs (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
-  {{hub- $cfg := (dig "htpasswdUsers" (dict) ((dig "data" "config" "" $rcm) | fromYaml | default dict)) hub}}
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "htpasswdUsers") hub}}
+  {{hub- if not $cfg hub}}
+  {{hub- fail "htpasswd-users: config.htpasswdUsers is missing or empty in the rendered-config ConfigMap" hub}}
+  {{hub- end hub}}
   {{hub- range $g := (dig "groups" (list) $cfg) hub}}
   {{hub- $gname := (dig "name" "" $g) hub}}
-  {{hub- if $gname hub}}
+  {{hub- if not $gname hub}}
+  {{hub- fail "htpasswd-users: every config.htpasswdUsers.groups entry needs a name" hub}}
+  {{hub- end hub}}
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: user.openshift.io/v1
@@ -48,7 +56,9 @@ object-templates-raw: |
   {{hub- range $nr := (dig "namespaceRoles" (list) $g) hub}}
   {{hub- $ns := (dig "namespace" "" $nr) hub}}
   {{hub- $role := (dig "role" "" $nr) hub}}
-  {{hub- if and $ns $role hub}}
+  {{hub- if not (and $ns $role) hub}}
+  {{hub- fail (printf "htpasswd-users: group %s has a namespaceRoles entry without both namespace and role" $gname) hub}}
+  {{hub- end hub}}
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: rbac.authorization.k8s.io/v1
@@ -64,7 +74,5 @@ object-templates-raw: |
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: {{hub $gname hub}}
-  {{hub- end hub}}
-  {{hub- end hub}}
   {{hub- end hub}}
   {{hub- end hub}}
