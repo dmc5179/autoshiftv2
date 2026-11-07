@@ -1,164 +1,67 @@
-# agent-sandbox AutoShift Policy
+# agent-sandbox
 
-## Overview
-Installs the agent-sandbox-operator operator by using AutoShift's ACM **PolicyGenerator** pattern. The
-directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
-`manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
+Installs the Red Hat build of Agent Sandbox Operator, which serves the `sandboxes.agents.x-k8s.io`
+API for running AI agents in isolated sandboxes. OpenShell, the agent runtime that ships as a
+Developer Preview with Red Hat OpenShift AI 3.5, requires it.
 
-## Layout
-```
-agent-sandbox/
-  kustomization.yaml            # entrypoint: generators: [policy-generator-config.yaml]
-  policy-generator-config.yaml  # the PolicyGenerator (policy graph, remediation, eval interval)
-  placement.yaml                # Placement predicate (autoshift.io/agent-sandbox) + tolerations
-  manifests/
-    operator-install/
-      kustomization.yaml        # renders the shared components/operator-install chart (Namespace +
-                                #   OperatorPolicy); per-operator ACM lookups are visible here
-```
-The operator-install renders the shared `components/operator-install` chart — edit the visible ACM
-lookups in `manifests/operator-install/kustomization.yaml` to tune the subscription/version. Add
-further CRs as new `policies[]` entries in `policy-generator-config.yaml` pointing at their own dirs.
+This policy installs the Operator only. It creates no sandboxes, and OpenShell itself has no
+policy: it is a Helm chart plus manifests with no OperatorHub entry, and is not supported for
+production. The OLM operators it depends on are the part AutoShift and disconnected mirroring can
+manage. The others are the optional [rhbk](../rhbk/README.md) and [osc](../osc/README.md) policies.
 
-## Test Locally
-```bash
-# Render the policy exactly as the CMP/CI does (needs: make install-policy-generator)
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/agent-sandbox
+## Policies
 
-# Full validation (helm render + hub/spoke template resolution + label contract)
-cd tools && go test -tags integration -count=1 ./internal/resolver/...
-```
-The `${POLICY_NAMESPACE}`, `${REMEDIATION}`, `${EVAL_COMPLIANT}`, `${EVAL_NONCOMPLIANT}` tokens are
-substituted per-deployment by the repo-server CMP before `kustomize build` runs; leave them as-is.
+| Policy | Mode | What it does |
+|---|---|---|
+| `policy-agent-sandbox-operator-install` | enforce | The `agent-sandbox-system` namespace and the `agent-sandbox-operator` subscription |
 
-## Enable on Clusters
-Labels are defined in values files only — never directly on managed clusters. The cluster-labels
-policy propagates them, and this policy's `placement.yaml` selects clusters with
-`autoshift.io/agent-sandbox: 'true'`.
+## Enabling
 
 ```yaml
-# In autoshift/values/clustersets/hub.yaml (or another clusterset / per-cluster file)
 hubClusterSets:
   hub:
     labels:
       agent-sandbox: 'true'
-      agent-sandbox-subscription-name: 'agent-sandbox-operator'
-      agent-sandbox-channel: 'preview-0.9'
-      agent-sandbox-source: 'redhat-operators'
-      agent-sandbox-source-namespace: 'openshift-marketplace'
-      # agent-sandbox-version: 'agent-sandbox-operator.v1.x.x'  # Optional: pin to a specific CSV
-```
-`generate-operator-policy.sh --add-to-autoshift` adds these for you (and to `_example*.yaml`, which
-the label-contract CI requires for every consumed `autoshift.io/*` key).
-
-The ApplicationSet auto-discovers new directories under `policies/stable/*` (and `certified`/
-`community`) — no manual registration required.
-
-## Version Control
-- **Automatic upgrades** within the channel by default.
-- **Pin a version** with the `agent-sandbox-version` label — a pinned version sets a manual
-  install plan (`startingCSV` + `versions`), so upgrades become explicit.
-```bash
-# Find available CSV versions
-oc get packagemanifests agent-sandbox-operator -o jsonpath='{.status.channels[*].currentCSV}'
+      agent-sandbox-subscription-name: agent-sandbox-operator
+      agent-sandbox-channel: preview-0.9
+      agent-sandbox-source: redhat-operators
+      agent-sandbox-source-namespace: openshift-marketplace
+      # agent-sandbox-version: 'agent-sandbox-operator.v0.9.0'   # optional CSV pin
 ```
 
-## Adding Configuration (operator CRs)
-After the operator installs, add its Custom Resources as **bare manifests** — do NOT hand-write a
-ConfigurationPolicy wrapper; PolicyGenerator generates it.
-
-1. Explore the CRDs the operator installed:
-   ```bash
-   oc get pods -n agent-sandbox-system
-   oc get crds | grep agent-sandbox
-   oc explain <CustomResourceName>
-   ```
-2. For a **static** CR, drop a bare manifest into `manifests/`:
-   ```yaml
-   # manifests/agent-sandbox-config.yaml
-   apiVersion: <operator apiVersion>
-   kind: <CustomResource>
-   metadata:
-     name: agent-sandbox-config
-     namespace: agent-sandbox-system
-   spec:
-     setting: value
-   ```
-3. For a CR that needs **hub templates / loops / conditionals**, use a bare `object-templates-raw`
-   manifest instead (PG still wraps it into one ConfigurationPolicy; `complianceType` lives inside):
-   ```yaml
-   # manifests/agent-sandbox-config.yaml
-   object-templates-raw: |
-     - complianceType: musthave
-       objectDefinition:
-         apiVersion: <operator apiVersion>
-         kind: <CustomResource>
-         metadata:
-           name: agent-sandbox-config
-           namespace: agent-sandbox-system
-         spec:
-           setting: '{{hub index .ManagedClusterLabels "autoshift.io/agent-sandbox-setting" | default "default-value" hub}}'
-   ```
-4. If the config must be its **own** Policy (separate remediation, a dependency, or a different
-   predicate), add a `policies[]` entry in `policy-generator-config.yaml` (with `dependencies:` on
-   `policy-agent-sandbox-operator-install`) and point it at the new manifest with its own
-   `placement.placementPath`. `generate-policy.sh --dir policies/stable/agent-sandbox` scaffolds this.
-
-Document any new `autoshift.io/agent-sandbox-*` label in `autoshift/values/clustersets/_example.yaml`
-or the label-contract CI (`go test -tags integration`) fails with `Missing`.
-
-### Readiness / status checks
-A status assertion (e.g. CSV `phase: Succeeded`) can only be observed, so give it its own
-`policies[]` entry with `remediationAction: inform` — never fold an inform check into an enforce
-manifest (ACM's root action would clobber it).
-
-## Reference Examples
-- **Simple operator**: `policies/stable/cert-manager/` — bare Namespace + OperatorPolicy (this shape)
-- **Multiple related policies / placements**: `policies/stable/advanced-cluster-security/`
-- **Multiple config types**: `policies/stable/metallb/`
-- **Storage cluster config**: `policies/stable/openshift-data-foundation/`
-
-## Troubleshooting
-- **Policy not applied**: `oc get managedcluster <cluster> --show-labels`; check the Placement
-  (`oc get placement -n policies-autoshift`) and `oc describe policy policy-agent-sandbox-operator-install`.
-- **Operator install issues**: `oc get subscription,installplan -n agent-sandbox-system`;
-  `oc get catalogsource -n openshift-marketplace`.
-- **Render issues**: run the `kustomize build` above; hub templates use bare `{{hub … hub}}`
-  delimiters (no Helm `{{ "{{hub" }}` escaping in PolicyGenerator manifests).
-
-## Resources
-- [Operator Documentation](https://operatorhub.io/operator/agent-sandbox-operator)
-- [AutoShift Developer Guide](../../../docs/developer-guide.md)
-- [ACM PolicyGenerator](https://github.com/open-cluster-management-io/policy-generator-plugin)
-
-## Why this and not the upstream manifest
-
-OpenShell's own air-gapped guidance points at the upstream `kubernetes-sigs/agent-sandbox` release
-manifest. Prefer this operator instead: it is a real OperatorHub entry, so standard `oc-mirror`
-catalog mirroring applies, whereas the upstream path is a raw manifest whose image reference you
-have to rewrite by hand.
-
-**Do not install both.** They ship the same CRDs into the same `agent-sandbox-system` namespace and
-will collide.
-
-OpenShell's preflight checks for `sandboxes.agents.x-k8s.io` serving `v1beta1` plus an
-`agent-sandbox-operator` CSV, which this satisfies.
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
 ## Requirements
 
-- OpenShift 4.19+
-- **RHCOS worker nodes. RHEL nodes are not supported.**
+- OpenShift 4.19 or later.
+- Red Hat Enterprise Linux CoreOS worker nodes. RHEL worker nodes are not supported.
+
+## Use this, not the upstream manifest
+
+OpenShell's own disconnected guidance points at the upstream `kubernetes-sigs/agent-sandbox` release
+manifest. This Operator is a catalog entry, so standard `oc-mirror` catalog mirroring carries it,
+where the upstream manifest's image reference has to be rewritten by hand.
+
+**Do not install both.** They ship the same CRDs into the same `agent-sandbox-system` namespace and
+collide.
+
+OpenShell's preflight checks for `sandboxes.agents.x-k8s.io` serving `v1beta1` and for an
+`agent-sandbox-operator` CSV. This Operator satisfies both.
 
 ## Install mode
 
-Verified against the catalog on OpenShift 4.22, `agent-sandbox-operator` v0.9.0:
+Checked against the catalog on OpenShift 4.22, `agent-sandbox-operator` v0.9.0:
 
 ```
 OwnNamespace=False  SingleNamespace=False  MultiNamespace=False  AllNamespaces=True
 ```
 
-AllNamespaces is the only mode this operator supports, which is what the shared chart produces by
-default, so no `targetNamespaces` is set. That matches the Red Hat guide, which installs it into
-`agent-sandbox-system` in *All namespaces* mode.
+AllNamespaces is the only mode the Operator supports, and it is what the shared operator-install
+chart produces by default, so this policy sets no `targetNamespaces`.
+
+## Verifying
+
+```bash
+oc get csv -n agent-sandbox-system
+oc get crd sandboxes.agents.x-k8s.io -o jsonpath='{.spec.versions[*].name}{"\n"}'
+```
