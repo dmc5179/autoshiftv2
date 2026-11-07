@@ -194,8 +194,8 @@ hubClusterSets:
       # =======================================================================
       openshiftLightspeed:
         # Required. A model id the MaaS gateway lists (GET /maas-api/v1/models), in the form
-        # publishers/<namespace>/models/<name>. This one matches the openshiftAiModels example
-        # above; it is an example, not a default.
+        # publishers/<namespace>/models/<name>. This example names the sample model of the
+        # openshift-ai-models policy; it is not a default.
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         # Secret in openshift-lightspeed holding a MaaS API key, created out of band by an
         # administrator; credentials never come from git. The key inside is always 'apitoken':
