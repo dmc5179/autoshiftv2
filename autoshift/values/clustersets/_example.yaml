@@ -2277,6 +2277,9 @@ hubClusterSets:
       # =======================================================================
       # Openshift Ai Maas
       # =======================================================================
+      # Also read by the openshift-ai policy: aigateway.modelsAsAService in its
+      # DataScienceCluster is Managed when this is 'true' and Removed otherwise,
+      # so turning it off after enabling removes Models-as-a-Service.
       openshift-ai-maas: 'false'
       # maas-api's database. The Secret is created out of band — it holds a
       # password — so these only say where to look for it, never what is in it.

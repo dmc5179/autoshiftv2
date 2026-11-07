@@ -1,134 +1,101 @@
-# openshift-ai AutoShift Policy
+# openshift-ai
 
-## Overview
-Installs the rhods-operator operator by using AutoShift's ACM **PolicyGenerator** pattern. The
-directory is a Kustomize source: `policy-generator-config.yaml` wraps the bare manifests under
-`manifests/` into an ACM `Policy`, and pairs it with the hand-authored `placement.yaml`.
+Installs the Red Hat OpenShift AI Operator and creates the platform: the `DSCInitialization` and the
+`DataScienceCluster` that choose which OpenShift AI components run. Two opt-in policies enable the
+MCP and Agents catalogs in the AI hub.
 
-## Layout
-```
-openshift-ai/
-  kustomization.yaml            # entrypoint: generators: [policy-generator-config.yaml]
-  policy-generator-config.yaml  # the PolicyGenerator (policy graph, remediation, eval interval)
-  placement.yaml                # Placement predicate (autoshift.io/openshift-ai) + tolerations
-  manifests/
-    operator-install/
-      kustomization.yaml        # renders the shared components/operator-install chart (Namespace +
-                                #   OperatorPolicy); per-operator ACM lookups are visible here
-```
-The operator-install renders the shared `components/operator-install` chart — edit the visible ACM
-lookups in `manifests/operator-install/kustomization.yaml` to tune the subscription/version. Add
-further CRs as new `policies[]` entries in `policy-generator-config.yaml` pointing at their own dirs.
+## Policies
 
-## Test Locally
-```bash
-# Render the policy exactly as the CMP/CI does (needs: make install-policy-generator)
-KUSTOMIZE_PLUGIN_HOME=$PWD/.tools/kustomize-plugin .tools/kustomize build \
-  --enable-alpha-plugins --enable-helm --load-restrictor LoadRestrictionsNone \
-  policies/stable/openshift-ai
+| Policy | Mode | What it does |
+|---|---|---|
+| `policy-openshift-ai-operator-install` | enforce | The `redhat-ods-operator` namespace and the `rhods-operator` subscription |
+| `policy-openshift-ai-dsc` | enforce | `DSCInitialization` `default-dsci` and `DataScienceCluster` `default-dsc`. Waits for the Operator |
+| `policy-openshift-ai-ready` | inform | The `DataScienceCluster` reports `Ready` |
+| `policy-openshift-ai-mcp-catalog` | enforce | The `mcplifecycleoperator` component and the dashboard `mcpCatalog` flag. Opt-in |
+| `policy-openshift-ai-agents-cat` | enforce | The dashboard `agentsCatalog` flag. Opt-in |
 
-# Full validation (helm render + hub/spoke template resolution + label contract)
-cd tools && go test -tags integration -count=1 ./internal/resolver/...
-```
-The `${POLICY_NAMESPACE}`, `${REMEDIATION}`, `${EVAL_COMPLIANT}`, `${EVAL_NONCOMPLIANT}` tokens are
-substituted per-deployment by the repo-server CMP before `kustomize build` runs; leave them as-is.
-
-## Enable on Clusters
-Labels are defined in values files only — never directly on managed clusters. The cluster-labels
-policy propagates them, and this policy's `placement.yaml` selects clusters with
-`autoshift.io/openshift-ai: 'true'`.
+## Enabling
 
 ```yaml
-# In autoshift/values/clustersets/hub.yaml (or another clusterset / per-cluster file)
 hubClusterSets:
   hub:
     labels:
       openshift-ai: 'true'
-      openshift-ai-subscription-name: 'rhods-operator'
-      openshift-ai-channel: 'stable-3.x'
-      openshift-ai-source: 'redhat-operators'
-      openshift-ai-source-namespace: 'openshift-marketplace'
-      # openshift-ai-version: 'rhods-operator.v1.x.x'  # Optional: pin to a specific CSV
+      openshift-ai-subscription-name: rhods-operator
+      openshift-ai-channel: stable-3.x
+      openshift-ai-source: redhat-operators
+      openshift-ai-source-namespace: openshift-marketplace
+      # openshift-ai-version: 'rhods-operator.3.5.2'   # optional CSV pin
+      openshift-ai-mcp-catalog: 'false'
+      openshift-ai-agents-catalog: 'false'
+      openshift-ai-maas: 'false'
 ```
-`generate-operator-policy.sh --add-to-autoshift` adds these for you (and to `_example*.yaml`, which
-the label-contract CI requires for every consumed `autoshift.io/*` key).
 
-The ApplicationSet auto-discovers new directories under `policies/stable/*` (and `certified`/
-`community`) — no manual registration required.
+| Label | Meaning |
+|---|---|
+| `openshift-ai` and the standard operator labels | Install the Operator and create the platform |
+| `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP gateway Operator |
+| `openshift-ai-agents-catalog` | Enable the Agents catalog. Developer Preview |
+| `openshift-ai-maas` | Owned by [openshift-ai-maas](../openshift-ai-maas/README.md). This policy reads it to set `aigateway.modelsAsAService` |
 
-## Version Control
-- **Automatic upgrades** within the channel by default.
-- **Pin a version** with the `openshift-ai-version` label — a pinned version sets a manual
-  install plan (`startingCSV` + `versions`), so upgrades become explicit.
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
+
+## The DataScienceCluster
+
+The component set is fixed in `manifests/dsc/datasciencecluster.yaml`. Two settings in it are not
+obvious from the CRD.
+
+**`llamastackoperator` must be `Removed`.** It is deprecated in favor of `ogx`. Leaving it
+`Managed`, or unset on an existing `DataScienceCluster`, where it defaults to `Managed`, makes the
+Operator reject `ogx`. That rejection aborts the whole module-provisioning batch, which stops
+`aigateway` from installing its CRDs. The symptom is that Models-as-a-Service never appears while
+`modelsAsAService` still reads `Managed`.
+
+**`aigateway.modelsAsAService` follows the `openshift-ai-maas` label.** It is `Managed` when that
+label is `'true'` and `Removed` otherwise, so Models-as-a-Service runs only where the
+`openshift-ai-maas` policy also supplies its Gateway. Unlike most AutoShift labels, turning
+`openshift-ai-maas` off afterwards does not only stop reconciling: this policy sets the component to
+`Removed`, and the Operator removes Models-as-a-Service from the cluster.
+
+The `DSCInitialization` sets monitoring to `Managed` and deliberately leaves out the metrics and
+traces configuration. Populating it starts the Operator's observability stack (MonitoringStack,
+ThanosQuerier, Perses, tracing), which needs the Tempo, OpenTelemetry and Cluster Observability
+Operators installed first. AutoShift has policies for all three. Enable those, then add the
+configuration.
+
+## The catalogs
+
+Both catalogs configure objects this policy already owns, so they are extra policies on the same
+objects rather than separate directories. `musthave` merges only the listed fields, so a partial
+`DataScienceCluster` and a partial `OdhDashboardConfig` coexist with the main manifests.
+
+- **MCP catalog.** The `mcplifecycleoperator` component and the dashboard flag ship together,
+  because either alone is broken: the component without the flag is invisible, and the flag without
+  the component gives a catalog whose Deploy action does nothing. The MCP gateway Operator is a
+  separate prerequisite that OpenShift AI does not install; the
+  [mcp-gateway](../mcp-gateway/README.md) policy installs it. That Operator requires its own
+  Red Hat Connectivity Link version, so it and the `connectivity-link` policy both have an opinion
+  about which version is installed.
+- **Agents catalog.** A dashboard flag only. It has no component and no custom-source mechanism.
+
+The model catalog needs nothing here: the main `DataScienceCluster` already enables what it needs.
+Add custom model catalog sources in the dashboard. The Operator owns the sources ConfigMap, so a
+policy managing it would fight the Operator.
+
+## Dependencies
+
+`policy-openshift-ai-dsc` depends on the Operator install, because both CRDs arrive with the CSV and
+a `ConfigurationPolicy` naming an unknown kind reports Compliant while doing nothing. The catalogs
+depend on `policy-openshift-ai-dsc`.
+
+The OpenShift AI Operator requires cert-manager, from the [cert-manager](../cert-manager/README.md)
+policy. Models-as-a-Service additionally needs [openshift-ai-maas](../openshift-ai-maas/README.md),
+Red Hat Connectivity Link and LeaderWorkerSet.
+
+## Verifying
+
 ```bash
-# Find available CSV versions
-oc get packagemanifests rhods-operator -o jsonpath='{.status.channels[*].currentCSV}'
+oc get datasciencecluster default-dsc -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+oc get datasciencecluster default-dsc -o jsonpath='{.spec.components.aigateway}{"\n"}'
+oc get csv -n redhat-ods-operator
 ```
-
-## Adding Configuration (operator CRs)
-After the operator installs, add its Custom Resources as **bare manifests** — do NOT hand-write a
-ConfigurationPolicy wrapper; PolicyGenerator generates it.
-
-1. Explore the CRDs the operator installed:
-   ```bash
-   oc get pods -n redhat-ods-operator
-   oc get crds | grep openshift-ai
-   oc explain <CustomResourceName>
-   ```
-2. For a **static** CR, drop a bare manifest into `manifests/`:
-   ```yaml
-   # manifests/openshift-ai-config.yaml
-   apiVersion: <operator apiVersion>
-   kind: <CustomResource>
-   metadata:
-     name: openshift-ai-config
-     namespace: redhat-ods-operator
-   spec:
-     setting: value
-   ```
-3. For a CR that needs **hub templates / loops / conditionals**, use a bare `object-templates-raw`
-   manifest instead (PG still wraps it into one ConfigurationPolicy; `complianceType` lives inside):
-   ```yaml
-   # manifests/openshift-ai-config.yaml
-   object-templates-raw: |
-     - complianceType: musthave
-       objectDefinition:
-         apiVersion: <operator apiVersion>
-         kind: <CustomResource>
-         metadata:
-           name: openshift-ai-config
-           namespace: redhat-ods-operator
-         spec:
-           setting: '{{hub index .ManagedClusterLabels "autoshift.io/openshift-ai-setting" | default "default-value" hub}}'
-   ```
-4. If the config must be its **own** Policy (separate remediation, a dependency, or a different
-   predicate), add a `policies[]` entry in `policy-generator-config.yaml` (with `dependencies:` on
-   `policy-openshift-ai-operator-install`) and point it at the new manifest with its own
-   `placement.placementPath`. `generate-policy.sh --dir policies/stable/openshift-ai` scaffolds this.
-
-Document any new `autoshift.io/openshift-ai-*` label in `autoshift/values/clustersets/_example.yaml`
-or the label-contract CI (`go test -tags integration`) fails with `Missing`.
-
-### Readiness / status checks
-A status assertion (e.g. CSV `phase: Succeeded`) can only be observed, so give it its own
-`policies[]` entry with `remediationAction: inform` — never fold an inform check into an enforce
-manifest (ACM's root action would clobber it).
-
-## Reference Examples
-- **Simple operator**: `policies/stable/cert-manager/` — bare Namespace + OperatorPolicy (this shape)
-- **Multiple related policies / placements**: `policies/stable/advanced-cluster-security/`
-- **Multiple config types**: `policies/stable/metallb/`
-- **Storage cluster config**: `policies/stable/openshift-data-foundation/`
-
-## Troubleshooting
-- **Policy not applied**: `oc get managedcluster <cluster> --show-labels`; check the Placement
-  (`oc get placement -n policies-autoshift`) and `oc describe policy policy-openshift-ai-operator-install`.
-- **Operator install issues**: `oc get subscription,installplan -n redhat-ods-operator`;
-  `oc get catalogsource -n openshift-marketplace`.
-- **Render issues**: run the `kustomize build` above; hub templates use bare `{{hub … hub}}`
-  delimiters (no Helm `{{ "{{hub" }}` escaping in PolicyGenerator manifests).
-
-## Resources
-- [Operator Documentation](https://operatorhub.io/operator/rhods-operator)
-- [AutoShift Developer Guide](../../../docs/developer-guide.md)
-- [ACM PolicyGenerator](https://github.com/open-cluster-management-io/policy-generator-plugin)
