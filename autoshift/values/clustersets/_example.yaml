@@ -2604,16 +2604,6 @@ hubClusterSets:
       # The model and the API key Secret are config.openshiftLightspeed, not
       # labels: a MaaS model id contains slashes, which a label value cannot.
 
-      # =======================================================================
-      # Mcp Gateway
-      # =======================================================================
-      mcp-gateway: 'false'
-      mcp-gateway-subscription-name: mcp-gateway
-      mcp-gateway-channel: preview
-      mcp-gateway-source: redhat-operators
-      mcp-gateway-source-namespace: openshift-marketplace
-      mcp-gateway-version: ''
-
       # Zero Trust Workload Identity Manager (SPIRE)
       # =======================================================================
       ztwim: 'false'

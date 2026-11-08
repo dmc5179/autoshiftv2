@@ -33,7 +33,7 @@ hubClusterSets:
 | Label | Meaning |
 |---|---|
 | `openshift-ai` and the standard operator labels | Install the Operator and create the platform |
-| `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP gateway Operator |
+| `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP Gateway, which Red Hat Connectivity Link 1.5 includes |
 | `openshift-ai-agents-catalog` | Enable the Agents catalog. Developer Preview |
 
 Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
@@ -70,11 +70,10 @@ objects rather than separate directories. `musthave` merges only the listed fiel
 
 - **MCP catalog.** The `mcplifecycleoperator` component and the dashboard flag ship together,
   because either alone is broken: the component without the flag is invisible, and the flag without
-  the component gives a catalog whose Deploy action does nothing. The MCP gateway Operator is a
-  separate prerequisite that OpenShift AI does not install; the
-  [mcp-gateway](../mcp-gateway/README.md) policy installs it. That Operator requires its own
-  Red Hat Connectivity Link version, so it and the `connectivity-link` policy both have an opinion
-  about which version is installed.
+  the component gives a catalog whose Deploy action does nothing. The MCP Gateway is a prerequisite
+  that OpenShift AI does not install. Red Hat Connectivity Link 1.5 includes it, so enable the
+  [connectivity-link](../connectivity-link/README.md) policy on a 1.5 channel such as `stable-1.5`.
+  No separate MCP Gateway Operator is installed.
 - **Agents catalog.** A dashboard flag only. It has no component and no custom-source mechanism.
 
 The model catalog needs nothing here: the main `DataScienceCluster` already enables what it needs.

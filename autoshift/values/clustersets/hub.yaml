@@ -315,7 +315,8 @@ hubClusterSets:
       #
       # openshift-ai-maas was previously 'true' while openshift-ai was
       # 'false', which cannot work: the gateway needs the DataScienceCluster.
-      # Optional on top: openshift-lightspeed, mcp-gateway.
+      # Optional on top: openshift-lightspeed. The MCP Gateway needs no label:
+      # Connectivity Link 1.5 (connectivity-link-channel: stable-1.5) ships it.
       #
       # RHOAI is a large install (~75 GB of images). Do not enable it until
       # the control plane has headroom.

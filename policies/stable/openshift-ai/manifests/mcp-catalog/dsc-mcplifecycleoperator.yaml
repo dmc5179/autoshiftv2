@@ -6,15 +6,14 @@
 # in the RHOAI 3.5 docs:
 #
 #   1. RHOAI 3.5 on OpenShift 4.22 or later (doc section 2.3).
-#   2. The MCP gateway Operator, installed SEPARATELY. OpenShift AI does not
-#      autoinstall it and it is outside the OpenShift AI operator lifecycle
-#      (doc chapter 1). Installing it pulls in its own required Red Hat
-#      Connectivity Link version as a dependency - worth knowing if the
-#      connectivity-link policy is also enabled, since both then have an
-#      opinion about which RHCL is installed.
+#   2. The MCP Gateway. OpenShift AI does not install it and it is outside
+#      the OpenShift AI operator lifecycle (doc chapter 1). Red Hat
+#      Connectivity Link 1.5 ships it: the Kuadrant operator deploys the MCP
+#      Gateway operator itself, so the connectivity-link policy on a 1.5
+#      channel (stable-1.5) provides it with no separate install.
 #
-# This policy does not install the MCP gateway Operator. Enabling the label
-# without it gets you a catalog whose Deploy action does not work.
+# This policy does not install the MCP Gateway. Enabling the label without
+# Connectivity Link 1.5 gets you a catalog whose Deploy action does not work.
 #
 # Also note the MCPServer CRD is v1alpha1 with no backward compatibility
 # commitment; fields can change without a migration path.
