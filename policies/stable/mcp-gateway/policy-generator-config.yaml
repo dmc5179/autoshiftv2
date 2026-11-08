@@ -3,12 +3,13 @@ kind: PolicyGenerator
 metadata:
   name: mcp-gateway
 # Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
-# `kustomize build` runs. They live here and in placement*.yaml, never in manifests/, whose hub
+# `kustomize build` runs. They live here and in placement.yaml, never in manifests/, whose hub
 # templates contain `$vars` that substitution would clobber. The manifests read the policy
 # namespace from .PolicyMetadata.namespace instead.
 #
-# Which gateway instances and MCP servers a cluster has comes from config.mcpGateway in its
-# rendered-config, not from labels: an instance is a structured record, and a label is a string.
+# The gateway, the servers registered with it and who may call which tools come from
+# config.mcpGateway in the cluster's rendered-config, not from labels: they are structured
+# records, and a label is a string.
 #
 # Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
 placementBindingDefaults:
@@ -40,33 +41,20 @@ policies:
       - name: policy-rhcl-ready
     manifests:
       - path: test/prereqs.yaml
-  # Gateway, ReferenceGrant, MCPGatewayExtension and AuthPolicy per instance.
+  # The shared Gateway and MCPGatewayExtension, the AuthPolicies, and every configured server
+  # and virtual server. One policy: tool access lives on the server entries and renders into
+  # the gateway's AuthPolicies, so registering servers separately from the gateway would let
+  # the two disagree. With no servers configured the gateway alone is still created.
   - name: policy-mcp-gateway
     dependencies:
       - name: policy-mcp-gateway-prereqs
     manifests:
-      - path: manifests/gateway/instances.yaml
+      - path: manifests/mcp-gateway.yaml
+  # inform: the Gateway is Programmed, the extension and every registration Ready, the
+  # AuthPolicies Enforced, and the Secrets created out of band are present.
   - name: policy-mcp-gateway-ready
     remediationAction: inform
     dependencies:
       - name: policy-mcp-gateway
     manifests:
-      - path: test/gateway-ready.yaml
-  # Server registration has its own label: an instance is useful with no servers registered
-  # by AutoShift, and a placed policy with nothing to register would report Compliant while
-  # doing nothing.
-  - name: policy-mcp-gateway-servers
-    placement:
-      placementPath: placement-servers.yaml
-    dependencies:
-      - name: policy-mcp-gateway-ready
-    manifests:
-      - path: manifests/servers/registrations.yaml
-  - name: policy-mcp-gateway-servers-ready
-    remediationAction: inform
-    placement:
-      placementPath: placement-servers.yaml
-    dependencies:
-      - name: policy-mcp-gateway-servers
-    manifests:
-      - path: test/servers-ready.yaml
+      - path: test/ready.yaml

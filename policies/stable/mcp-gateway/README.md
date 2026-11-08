@@ -1,12 +1,13 @@
 # mcp-gateway
 
-Creates MCP gateway instances on Red Hat Connectivity Link 1.5, and optionally registers MCP
-servers with them. The MCP catalog in Red Hat OpenShift AI 3.5 deploys MCP servers; this policy
-gives agents one authenticated endpoint that federates their tools.
+Creates one shared MCP gateway on Red Hat Connectivity Link 1.5, registers MCP servers with it, and
+controls which groups and users can list and call which tools. The MCP catalog in Red Hat OpenShift
+AI 3.5 deploys MCP servers; this policy gives agents one authenticated endpoint that federates their
+tools.
 
-Enabled by the `autoshift.io/mcp-gateway` label. **What** it creates comes from
-`config.mcpGateway` in the cluster's rendered-config, not from labels. An instance is a structured
-record, and a label is a string.
+Enabled by the `autoshift.io/mcp-gateway` label. **What** it creates comes from `config.mcpGateway`
+in the cluster's rendered-config, not from labels. A gateway, a server and an access rule are
+structured records, and a label is a string.
 
 The MCP Gateway is a Technology Preview feature.
 
@@ -29,37 +30,36 @@ hubClusterSets:
       connectivity-link: 'true'
       connectivity-link-channel: stable-1.5
       mcp-gateway: 'true'
-      mcp-gateway-servers: 'true'   # optional: register config.mcpGateway.servers
 ```
 
-Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
-Turning a label off stops management and removes nothing.
+Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster. Turning
+the label off stops management and removes nothing.
 
 ## Configuration
 
 ```yaml
 config:
   mcpGateway:
-    instances:
-      - name: 'mcp-gateway'
-        namespace: 'mcp-system'
-        gateway:
-          name: 'mcp-gateway'
-          namespace: 'openshift-ingress'
-          className: 'openshift-default'
-          hostname: ''
-          tlsSecretName: ''
-          internalPort: 8080
-        auth:
-          type: 'kubernetes'
-          audiences:
-            - 'https://kubernetes.default.svc'
-        logLevel: 'info'
-        extraRouteNamespaces: []
+    gateway:
+      name: 'mcp-gateway'
+      namespace: 'mcp-gateway'
+      className: 'openshift-default'
+      hostname: ''
+      tlsSecretName: ''
+      internalPort: 8080
+      logLevel: 'info'
+      auth:
+        type: 'kubernetes'
+        audiences:
+          - 'https://kubernetes.default.svc'
+      toolAuthorization:
+        enabled: true
+        keySecretName: 'mcp-trusted-headers'
+        kuadrantNamespace: 'kuadrant-system'
+      extraRouteNamespaces: []
     servers:
       - name: 'openshift-mcp'
         namespace: 'mcp-servers'
-        instance: 'mcp-gateway'
         service: 'openshift-mcp'
         port: 8080
         path: '/mcp'
@@ -70,30 +70,49 @@ config:
         credentialSecret:
           name: 'openshift-mcp-credential'
           key: 'token'
+        access:
+          - groups: ['mcp-platform-admins']
+            tools: ['pods_list', 'pods_log', 'events_list', 'resources_get']
+          - groups: ['mcp-developers']
+            users: ['system:serviceaccount:agents:triage-agent']
+            tools: ['pods_list', 'events_list']
+      - name: 'docs-search'
+        namespace: 'mcp-servers'
+        port: 8000
+        prefix: 'docs_'
+        access:
+          - groups: ['mcp-platform-admins', 'mcp-developers']
+            tools: ['search', 'fetch']
+    virtualServers:
+      - name: 'triage'
+        description: 'Tools for incident triage'
+        tools: ['ocp_pods_list', 'ocp_events_list', 'docs_search']
 ```
 
 Every value in the sample is an example.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `instances` | | Required, at least one |
-| `instances[].name` | | Required. The `MCPGatewayExtension` name |
-| `instances[].namespace` | | Required. Created by the policy. The broker runs here. One instance per namespace |
-| `instances[].gateway.name` | `name` | |
-| `instances[].gateway.namespace` | `openshift-ingress` | |
-| `instances[].gateway.className` | `openshift-default` | |
-| `instances[].gateway.hostname` | `<name>.<ingress domain>` | The public endpoint. The domain is read on the managed cluster |
-| `instances[].gateway.tlsSecretName` | default IngressController certificate | Must be in the Gateway namespace |
-| `instances[].gateway.internalPort` | `8080` | The `*.mcp.local` listener that server routes attach to |
-| `instances[].auth.type` | | Required: `none`, `kubernetes` or `jwt` |
-| `instances[].auth.audiences` | `[https://kubernetes.default.svc]` | `kubernetes` only |
-| `instances[].auth.issuerUrl` | | Required with `jwt`. Also advertised as the OAuth authorization server |
-| `instances[].logLevel` | `info` | Broker log level |
-| `instances[].extraRouteNamespaces` | | More namespaces allowed to attach server routes |
-| `servers` | | Required when `mcp-gateway-servers` is on |
+| `gateway` | | Required |
+| `gateway.name` | `mcp-gateway` | The `Gateway` and the `MCPGatewayExtension` |
+| `gateway.namespace` | `mcp-gateway` | Created by the policy. The broker, the extension and the virtual servers run here |
+| `gateway.className` | `openshift-default` | |
+| `gateway.hostname` | `mcp.<ingress domain>` | The public endpoint. The domain is read on the managed cluster |
+| `gateway.tlsSecretName` | default IngressController certificate | Must be in `openshift-ingress` |
+| `gateway.internalPort` | `8080` | The `*.mcp.local` listener that server routes attach to |
+| `gateway.logLevel` | `info` | Broker log level |
+| `gateway.auth.type` | | Required: `none`, `kubernetes` or `jwt` |
+| `gateway.auth.audiences` | `[https://kubernetes.default.svc]` | `kubernetes` only |
+| `gateway.auth.issuerUrl` | | Required with `jwt`. Also advertised as the OAuth authorization server |
+| `gateway.auth.groupsClaim` | `groups` | `jwt` only. The token claim holding the caller's groups |
+| `gateway.auth.usernameClaim` | `preferred_username` | `jwt` only. The token claim matched against `users` |
+| `gateway.toolAuthorization.enabled` | `false` | Enforce `servers[].access`. Needs `auth.type` `kubernetes` or `jwt` |
+| `gateway.toolAuthorization.keySecretName` | `mcp-trusted-headers` | Names the key pair Secrets, see below |
+| `gateway.toolAuthorization.kuadrantNamespace` | `kuadrant-system` | Where the private key Secret lives |
+| `gateway.extraRouteNamespaces` | | More namespaces allowed to attach server routes |
+| `servers` | | Optional. With none, the gateway alone is created |
 | `servers[].name` | | Required. The registration name |
 | `servers[].namespace` | | Required. Where the MCP server runs. Not created |
-| `servers[].instance` | first instance | |
 | `servers[].service` | `name` | The MCP server's Service |
 | `servers[].port` | | Required. The Service port |
 | `servers[].path` | `/mcp` | |
@@ -101,39 +120,46 @@ Every value in the sample is an example.
 | `servers[].category` | `[uncategorised]` | Used by the gateway's tool discovery |
 | `servers[].hint` | | Short description for tool discovery |
 | `servers[].credentialSecret.name` / `.key` | / `token` | A Secret created out of band |
+| `servers[].access[].groups` / `.users` | | Who the entry grants. One of the two is required |
+| `servers[].access[].tools` | | Required. Tool names without the prefix |
+| `virtualServers[].name` / `.tools` | | Required. Tool names with the prefix |
+| `virtualServers[].description` | | |
 
-The policies fail, and name the missing field, when `instances` is empty, an instance has no
-`name`, `namespace` or valid `auth.type`, a `jwt` instance has no `issuerUrl`, or a server lacks
-`name`, `namespace`, `port` or `prefix` or names an undefined instance. A placed policy with
-nothing to create would otherwise report Compliant.
+The policies fail, and name the problem, when `gateway` or `auth.type` is missing, a `jwt` gateway
+has no `issuerUrl`, a server lacks `name`, `namespace`, `port` or `prefix`, a virtual server lacks
+`name` or `tools`, or tool access is inconsistent: `access` without `toolAuthorization.enabled`,
+`toolAuthorization` with `auth.type: none` or with no `access` entries at all, an entry with no
+`tools` or with neither `groups` nor `users`, or a `*` among the tools.
 
 ## Policies
 
 | Policy | Mode | Does |
 |--------|------|------|
 | `policy-mcp-gateway-prereqs` | inform | The MCP Gateway CRDs are established and `KuadrantControlPlane` is `Ready`. Waits for `policy-rhcl-ready` |
-| `policy-mcp-gateway` | enforce | Per instance: the namespace, `Gateway`, `ReferenceGrant`, `MCPGatewayExtension` and `AuthPolicy`. Also the shared `openshift-default` GatewayClass |
-| `policy-mcp-gateway-ready` | inform | The EnvoyFilter CRD exists, each `Gateway` is `Programmed`, each `MCPGatewayExtension` is `Ready`, each `AuthPolicy` is `Enforced` |
-| `policy-mcp-gateway-servers` | enforce | Per server: an `HTTPRoute` and an `MCPServerRegistration`. Placed only with `mcp-gateway-servers` |
-| `policy-mcp-gateway-servers-ready` | inform | Each `MCPServerRegistration` is `Ready`, and each credential Secret exists with its label |
+| `policy-mcp-gateway` | enforce | The namespace, `Gateway`, `ReferenceGrant`, `MCPGatewayExtension`, the `AuthPolicy` objects, and per server an `HTTPRoute` and an `MCPServerRegistration`, per virtual server an `MCPVirtualServer`. Also the shared `openshift-default` GatewayClass |
+| `policy-mcp-gateway-ready` | inform | The EnvoyFilter CRD exists, the `Gateway` is `Programmed`, the extension and each registration `Ready`, each `AuthPolicy` `Enforced`, and each Secret created out of band is present |
 
 The prerequisite gate matters because a `ConfigurationPolicy` naming a kind whose CRD does not
 exist reports Compliant while doing nothing. On Connectivity Link 1.4 the chain stays Pending
 instead.
 
-## How an instance is wired
+## How the gateway is wired
 
-Each instance gets its own `Gateway`, with two listeners:
+One `Gateway`, `openshift-ingress/<name>`, with two listeners:
 
-- `mcp`, HTTPS on 443, is the public endpoint. The MCP Gateway controller creates the HTTPRoute
-  for `/mcp` on it, and the `AuthPolicy` protects it.
-- `mcp-internal`, HTTP, carries the `*.mcp.local` hostnames that server routes attach to. The broker
-  reaches the servers through it, so `privateHost` points at it explicitly.
+- `mcp`, HTTPS on 443, is the public endpoint. The MCP Gateway controller creates the HTTPRoute for
+  `/mcp` on it, and the `<name>-mcp` `AuthPolicy` protects it.
+- `mcp-internal`, HTTP, carries the `*.mcp.local` hostnames that server routes attach to. The
+  broker reaches the servers through it, so `privateHost` points at it explicitly.
 
-The internal listener accepts routes only from the instance namespace, the namespaces of the
+The `Gateway` is in `openshift-ingress` because the Ingress Operator's Gateway API implementation
+requires every `openshift-default` Gateway to be there. Kuadrant policies attach only to targets in
+their own namespace, so the `AuthPolicy` objects are there too. The broker runs in its own
+namespace, `gateway.namespace`, so it does not share a namespace with the router.
+
+The internal listener accepts routes only from the gateway namespace, the namespaces of the
 configured servers, and `extraRouteNamespaces`, never from all namespaces. It is served by the same
-Gateway Service as the public listener, so a route attached from any namespace would be reachable
-without passing the `AuthPolicy`.
+Gateway Service as the public listener.
 
 ## Registering servers from the MCP catalog
 
@@ -142,8 +168,9 @@ Service, and creates no route or registration. List the server under `config.mcp
 with its Service name and port; this policy adds an `HTTPRoute` with the hostname
 `<namespace>-<name>.mcp.local` and an `MCPServerRegistration`.
 
-To register servers by hand instead, leave `mcp-gateway-servers` off and add the namespace to
-`extraRouteNamespaces`, so the route can attach.
+To register a server by hand instead, add its namespace to `extraRouteNamespaces` so its route can
+attach. With tool authorization on, a server that is not in `servers` has no access entries, so
+its tools are neither listed nor callable.
 
 A credential Secret is created out of band, never from values, and needs the label
 `mcp.kuadrant.io/secret=true`. The broker uses it for tool discovery and never sends it with a
@@ -154,13 +181,70 @@ client's tool call.
 `auth.type` has no default, so an unauthenticated tool endpoint is a decision someone wrote down.
 
 - `kubernetes` validates OpenShift user tokens and ServiceAccount tokens through a TokenReview.
-- `jwt` validates tokens from an OpenID Connect issuer, such as Red Hat build of Keycloak, and sets
-  `oauthProtectedResource` so MCP clients discover the issuer.
+- `jwt` validates tokens from an OpenID Connect issuer, such as Red Hat build of Keycloak, sets
+  `oauthProtectedResource` so MCP clients discover the issuer, and answers an unauthenticated
+  request with a `WWW-Authenticate` header that points at it.
 - `none` creates no `AuthPolicy`.
 
-The `AuthPolicy` excludes `/.well-known/oauth-protected-resource`, which clients read before they
-have a token. The `AuthPolicy` uses `mustonlyhave`: under `musthave`, a changed `auth.type` would
-leave the old method beside the new one, and a request passes when any method succeeds.
+The public `AuthPolicy` excludes `/.well-known/oauth-protected-resource`, which clients read
+before they have a token. Both `AuthPolicy` objects use `mustonlyhave`: under `musthave`, a changed
+`auth.type` would leave the old method beside the new one, and a request passes when any method
+succeeds.
+
+## Tool authorization
+
+With `toolAuthorization.enabled`, each `servers[].access` entry grants its `groups` and `users`
+the listed tools of that server. A tool no entry lists is hidden from and refused to everyone. The
+mapping lives in Git, in config, and applies on the next policy evaluation; nothing in the identity
+provider has to change.
+
+Who the caller is depends on `auth.type`:
+
+| `auth.type` | Groups | User |
+|---|---|---|
+| `kubernetes` | the TokenReview's groups: OpenShift groups, and `system:serviceaccounts:<namespace>` for a ServiceAccount | the user name, `system:serviceaccount:<namespace>:<name>` for a ServiceAccount |
+| `jwt` | the `groupsClaim` claim | the `usernameClaim` claim |
+
+Two enforcement points, both rendered from the same access entries:
+
+1. **`tools/list`.** The public `AuthPolicy` computes the caller's allowed tools per server and
+   sends them to the broker as `x-authorized-tools`, a JWT that Authorino signs with the private
+   key and that expires after five minutes. The broker verifies it with the public key named in the
+   `MCPGatewayExtension` `trustedHeadersKey` and lists only those tools. A client cannot forge
+   the header without the private key.
+2. **`tools/call`.** The router routes a tool call through the internal listener, adding
+   `x-mcp-servername` (`<namespace>/<registration name>`) and `x-mcp-toolname` (the tool name
+   without its prefix). The `<name>-tools` `AuthPolicy` on that listener authenticates the caller
+   again and allows the call only when an access entry for that server lists the tool and names the
+   caller or one of the caller's groups. Anything else on that listener is denied.
+
+Tools are named in `access` as the server names them, without the prefix. The broker filters by
+exact name and has no wildcard, so every tool is listed.
+
+`virtualServers` select a curated `tools/list` with the header
+`X-Mcp-Virtualserver: <gateway namespace>/<name>`. They grant nothing: with tool authorization the
+list a client sees is the intersection of the virtual server and the caller's access.
+
+### The signing key
+
+The key pair is a secret, so it never comes from values and no policy creates it. Create both
+halves out of band, with the default names:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
+openssl ec -in private-key.pem -pubout -out public-key.pem
+oc create secret generic mcp-trusted-headers-private -n kuadrant-system \
+  --from-file=key.pem=private-key.pem
+oc create secret generic mcp-trusted-headers -n mcp-gateway --from-file=key=public-key.pem
+```
+
+The private key goes in the Kuadrant namespace because Authorino reads a signing key from the
+namespace of the `AuthConfig` that Kuadrant generates, not from the `AuthPolicy` namespace. The
+extension's own `trustedHeadersKey.generate: Enabled` is not used: it would put the private key in
+the gateway namespace, where Authorino cannot read it. `policy-mcp-gateway-ready` reports either
+Secret missing; until both exist, expect neither the extension nor the public `AuthPolicy` to become ready.
+
+To rotate, replace both Secrets together.
 
 ## Disconnected clusters
 
@@ -174,6 +258,7 @@ carries them.
 oc get kuadrantcontrolplane default -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
 oc get mcpgatewayextensions.mcp.kuadrant.io -A
 oc get mcpserverregistrations.mcp.kuadrant.io -A
+oc get mcpvirtualservers.mcp.kuadrant.io -A
 oc get gateways.gateway.networking.k8s.io -n openshift-ingress
 oc get authpolicies.kuadrant.io -n openshift-ingress
 ```

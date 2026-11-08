@@ -63,6 +63,21 @@ clusters:
               endpointSPIFFEID: 'spiffe://other.example.com/spire/server'
 
       # =====================================================================
+      # MCP gateway — per-cluster override
+      # =====================================================================
+      # Merged over the clusterset's config.mcpGateway. Keys are documented in
+      # autoshift/values/clustersets/_example.yaml. This cluster authenticates
+      # MCP clients against an OpenID Connect issuer instead of OpenShift, so
+      # the groups in the access entries come from the token's groups claim.
+      mcpGateway:
+        gateway:
+          auth:
+            type: 'jwt'
+            issuerUrl: 'https://keycloak.example.com/realms/mcp'
+            groupsClaim: 'groups'
+            usernameClaim: 'preferred_username'
+
+      # =====================================================================
       # Networking — shared with other policies (e.g., nmstate)
       # =====================================================================
       networking:
