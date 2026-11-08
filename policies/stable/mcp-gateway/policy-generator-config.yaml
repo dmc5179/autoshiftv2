@@ -1,0 +1,72 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: mcp-gateway
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement*.yaml, never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber. The manifests read the policy
+# namespace from .PolicyMetadata.namespace instead.
+#
+# Which gateway instances and MCP servers a cluster has comes from config.mcpGateway in its
+# rendered-config, not from labels: an instance is a structured record, and a label is a string.
+#
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-mcp-gateway
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  placement:
+    placementPath: placement.yaml
+policies:
+  # inform: the MCP Gateway CRDs exist and the KuadrantControlPlane is Ready. Depends on
+  # connectivity-link's readiness policy, so this chain stays Pending, not falsely green, on
+  # a cluster without Connectivity Link 1.5.
+  - name: policy-mcp-gateway-prereqs
+    remediationAction: inform
+    dependencies:
+      - name: policy-rhcl-ready
+    manifests:
+      - path: test/prereqs.yaml
+  # Gateway, ReferenceGrant, MCPGatewayExtension and AuthPolicy per instance.
+  - name: policy-mcp-gateway
+    dependencies:
+      - name: policy-mcp-gateway-prereqs
+    manifests:
+      - path: manifests/gateway/instances.yaml
+  - name: policy-mcp-gateway-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-mcp-gateway
+    manifests:
+      - path: test/gateway-ready.yaml
+  # Server registration has its own label: an instance is useful with no servers registered
+  # by AutoShift, and a placed policy with nothing to register would report Compliant while
+  # doing nothing.
+  - name: policy-mcp-gateway-servers
+    placement:
+      placementPath: placement-servers.yaml
+    dependencies:
+      - name: policy-mcp-gateway-ready
+    manifests:
+      - path: manifests/servers/registrations.yaml
+  - name: policy-mcp-gateway-servers-ready
+    remediationAction: inform
+    placement:
+      placementPath: placement-servers.yaml
+    dependencies:
+      - name: policy-mcp-gateway-servers
+    manifests:
+      - path: test/servers-ready.yaml

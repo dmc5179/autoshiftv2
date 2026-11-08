@@ -1,0 +1,24 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-mcp-gateway-servers
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # Opt-in on top of mcp-gateway: registering servers requires an instance to register with.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/mcp-gateway'
+              operator: In
+              values:
+                - 'true'
+            - key: 'autoshift.io/mcp-gateway-servers'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

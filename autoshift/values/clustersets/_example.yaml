@@ -187,6 +187,62 @@ hubClusterSets:
             toolCallParser: 'granite4'
 
       # =======================================================================
+      # mcp-gateway — MCP gateway instances and the MCP servers registered with them (DATA;
+      # the ENABLE flags are the mcp-gateway and mcp-gateway-servers labels below). Needs
+      # Connectivity Link 1.5, which deploys the MCP Gateway controller itself. Every value
+      # below is an example: names, namespaces, hostnames and the issuer are site choices.
+      # =======================================================================
+      mcpGateway:
+        instances:                               # required, at least one
+          - name: 'mcp-gateway'                  # required: the MCPGatewayExtension name
+            namespace: 'mcp-system'              # required: broker namespace, one instance each
+            gateway:
+              name: 'mcp-gateway'                # default: the instance name
+              namespace: 'openshift-ingress'     # default: openshift-ingress
+              className: 'openshift-default'
+              # Public hostname. Default: <name>.<cluster ingress domain>, discovered on the
+              # managed cluster. The TLS Secret must be in the Gateway namespace; the default
+              # is the certificate the default IngressController already serves.
+              hostname: ''
+              tlsSecretName: ''
+              internalPort: 8080                 # the *.mcp.local listener
+            # Required, no default: none, kubernetes or jwt. kubernetes accepts OpenShift
+            # user and ServiceAccount tokens through a TokenReview.
+            auth:
+              type: 'kubernetes'
+              audiences:
+                - 'https://kubernetes.default.svc'
+            logLevel: 'info'
+            # Namespaces allowed to attach routes to the internal listener besides the
+            # instance namespace and the namespaces of the servers below.
+            extraRouteNamespaces:
+              - 'mcp-team-a'
+          # A second, isolated instance authenticated by an OpenID Connect provider.
+          - name: 'mcp-gateway-oidc'
+            namespace: 'mcp-oidc'
+            auth:
+              type: 'jwt'
+              issuerUrl: 'https://keycloak.example.com/realms/mcp'
+        # Registered only when the mcp-gateway-servers label is on. One entry per MCP server
+        # Service, typically one the Red Hat OpenShift AI MCP catalog deployed.
+        servers:
+          - name: 'openshift-mcp'                # required: registration name, MCPServer name
+            namespace: 'mcp-servers'             # required: where the MCP server runs
+            instance: 'mcp-gateway'              # default: the first instance
+            service: 'openshift-mcp'             # default: name
+            port: 8080                           # required: the Service port
+            path: '/mcp'                         # default: /mcp
+            prefix: 'ocp_'                       # required and immutable: tool name prefix
+            category:
+              - 'platform'
+            hint: 'Read-only OpenShift cluster tools'
+            # A Secret created out of band, labeled mcp.kuadrant.io/secret=true. The broker
+            # uses it for tool discovery only; it is never sent with a client's tool call.
+            credentialSecret:
+              name: 'openshift-mcp-credential'
+              key: 'token'                       # default: token
+
+      # =======================================================================
       # cluster-autoscaler: the ClusterAutoscaler and per-MachineSet MachineAutoscalers
       # (DATA; the ENABLE flag is the cluster-autoscaler label below).
       # resourceLimits is required and is the cost ceiling: totals for the WHOLE cluster,
@@ -3264,6 +3320,16 @@ hubClusterSets:
       connectivity-link-source: redhat-operators
       connectivity-link-source-namespace: openshift-marketplace
       connectivity-link-version: ''
+
+      # =======================================================================
+      # MCP gateway (gateway instances on Connectivity Link 1.5)
+      # =======================================================================
+      # Instances and servers are config.mcpGateway. Needs connectivity-link on
+      # channel stable-1.5. mcp-gateway-servers also registers the servers in
+      # config.mcpGateway.servers; leave it off to register servers by hand.
+      # Turning either off stops management and removes nothing.
+      mcp-gateway: 'false'
+      mcp-gateway-servers: 'false'
 
       # =======================================================================
       # Openshift Ai

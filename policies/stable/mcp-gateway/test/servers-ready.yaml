@@ -1,0 +1,39 @@
+# Is each registered server federated by its broker?
+#
+# inform-only. Ready on an MCPServerRegistration means the broker connected to the server and
+# listed its tools. The usual reasons it stays False: the HTTPRoute does not attach to the
+# internal listener, the prefix is already taken by another registration, the credential
+# Secret is missing or lacks its label, or the MCP server itself is not running.
+#
+# The credential Secret check is musthave in an inform policy, so it reports a missing Secret
+# rather than creating an empty one.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "mcpGateway" | default dict) hub}}
+  {{hub- $servers := (dig "servers" (list) $cfg) hub}}
+  {{hub- if not $servers hub}}{{hub fail "mcp-gateway: the mcp-gateway-servers label is on but config.mcpGateway.servers is missing or empty" hub}}{{hub- end hub}}
+  {{hub- range $s := $servers hub}}
+  {{hub- if not (and (dig "name" "" $s) (dig "namespace" "" $s)) hub}}{{hub fail "mcp-gateway: every config.mcpGateway.servers entry needs name, namespace, port and prefix" hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: mcp.kuadrant.io/v1
+      kind: MCPServerRegistration
+      metadata:
+        name: {{hub (dig "name" "" $s) hub}}
+        namespace: {{hub (dig "namespace" "" $s) hub}}
+      status:
+        conditions:
+          - type: Ready
+            status: 'True'
+  {{hub- if (dig "credentialSecret" "name" "" $s) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: {{hub (dig "credentialSecret" "name" "" $s) hub}}
+        namespace: {{hub (dig "namespace" "" $s) hub}}
+        labels:
+          mcp.kuadrant.io/secret: 'true'
+  {{hub- end hub}}
+  {{hub- end hub}}

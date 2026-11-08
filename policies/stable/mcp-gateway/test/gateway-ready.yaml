@@ -1,0 +1,59 @@
+# Is each configured instance serving, as opposed to merely created?
+#
+# inform-only. The MCPGatewayExtension Ready condition covers the broker-router Deployment
+# and the EnvoyFilter in the Gateway namespace together. It stays False while the EnvoyFilter
+# CRD is missing, which is what an Istio control plane that never came up looks like from here.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "mcpGateway" | default dict) hub}}
+  {{hub- $instances := (dig "instances" (list) $cfg) hub}}
+  {{hub- if not $instances hub}}{{hub fail "mcp-gateway: config.mcpGateway.instances is missing or empty" hub}}{{hub- end hub}}
+  {{hub- range $i := $instances hub}}
+  {{hub- if not (and (dig "name" "" $i) (dig "namespace" "" $i)) hub}}{{hub fail "mcp-gateway: every config.mcpGateway.instances entry needs name and namespace" hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      metadata:
+        name: envoyfilters.networking.istio.io
+  {{hub- range $i := $instances hub}}
+  {{hub- $name := (dig "name" "" $i) hub}}
+  {{hub- $gwNs := (dig "gateway" "namespace" "openshift-ingress" $i) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: Gateway
+      metadata:
+        name: {{hub (dig "gateway" "name" $name $i) hub}}
+        namespace: {{hub $gwNs hub}}
+      status:
+        conditions:
+          - type: Programmed
+            status: 'True'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: mcp.kuadrant.io/v1
+      kind: MCPGatewayExtension
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub (dig "namespace" "" $i) hub}}
+      status:
+        conditions:
+          - type: Ready
+            status: 'True'
+  {{hub- if ne (dig "auth" "type" "" $i) "none" hub}}
+  # Accepted alone means the policy parsed. Enforced means Authorino is applying it.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: kuadrant.io/v1
+      kind: AuthPolicy
+      metadata:
+        name: {{hub $name hub}}-mcp
+        namespace: {{hub $gwNs hub}}
+      status:
+        conditions:
+          - type: Enforced
+            status: 'True'
+  {{hub- end hub}}
+  {{hub- end hub}}

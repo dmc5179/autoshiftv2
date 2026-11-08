@@ -319,6 +319,16 @@ clusters:
       connectivity-link-version: ''
 
       # =======================================================================
+      # MCP gateway (gateway instances on Connectivity Link 1.5)
+      # =======================================================================
+      # Instances and servers are config.mcpGateway. Needs connectivity-link on
+      # channel stable-1.5. mcp-gateway-servers also registers the servers in
+      # config.mcpGateway.servers; leave it off to register servers by hand.
+      # Turning either off stops management and removes nothing.
+      mcp-gateway: 'false'
+      mcp-gateway-servers: 'false'
+
+      # =======================================================================
       # Openshift Ai
       # =======================================================================
       openshift-ai: 'false'
