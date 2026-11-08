@@ -344,7 +344,14 @@ hubClusterSets:
       openshift-ai-channel: stable-3.x
       openshift-ai-source: redhat-operators
       openshift-ai-source-namespace: openshift-marketplace
-      openshift-ai-version: ''
+      # Pinned to RHOAI 3.5.2 GA. Without a pin, a new hub installs whatever heads
+      # stable-3.x on the day: 3.5.3 is already in Red Hat's disconnected helper,
+      # and 3.6 will land on this channel too. The pin becomes the OperatorPolicy's
+      # startingCSV and its only allowed version, so the hub stays on 3.5.2 until
+      # this line changes. The vLLM runtime digest under openshiftAiModels and
+      # the repo's disconnected imagesets are taken from this same bundle; bump
+      # all three together.
+      openshift-ai-version: 'rhods-operator.3.5.2'
 
       openshift-ai-maas: 'true'
       openshift-ai-models: 'true'
