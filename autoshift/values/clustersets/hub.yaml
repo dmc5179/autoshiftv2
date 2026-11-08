@@ -7,6 +7,17 @@ hubClusterSets:
       # =====================================================================
       # Required by the openshift-ai-models label. A model is a structured
       # record, not a string, so it lives here rather than in a label.
+      modelEgress:
+        baseline:
+          priority: 50
+        # Fenced namespaces. Never list models-as-a-service,
+        # redhat-ai-gateway-infra or kuadrant-system: maas-api, Authorino and
+        # Limitador make outbound calls (the RDS connection among them).
+        namespaces:
+          - 'llm'
+      openshiftLightspeed:
+        model: 'publishers/llm/models/granite-4-tiny-gpu'
+        secretName: 'maas-api-key'
       openshiftAiModels:
         namespace: 'llm'
         maasNamespace: 'models-as-a-service'
@@ -360,6 +371,30 @@ hubClusterSets:
 
       openshift-ai-maas: 'true'
       openshift-ai-models: 'true'
+      # MCP Catalog in the dashboard and the MCP Lifecycle Operator (DSC
+      # mcplifecycleoperator: Managed). The MCP Gateway itself comes with
+      # Connectivity Link 1.5 and needs no label.
+      openshift-ai-mcp-catalog: 'true'
+      # Cloud metadata endpoint deny for the namespaces in config.modelEgress.
+      # Stage 1 only; see docs/model-egress-rollout.md in rhoai-mass-quickstart.
+      model-egress: 'true'
+      # OpenShift Lightspeed, answering from the MaaS model in
+      # config.openshiftLightspeed. Needs the maas-api-key Secret in
+      # openshift-lightspeed, created out of band with a minted MaaS key.
+      # Use this policy OR scripts/40-lightspeed.sh, not both.
+      openshift-lightspeed: 'true'
+      openshift-lightspeed-subscription-name: lightspeed-operator
+      openshift-lightspeed-channel: stable
+      openshift-lightspeed-source: redhat-operators
+      openshift-lightspeed-source-namespace: openshift-marketplace
+      # Zero Trust Workload Identity Manager (SPIRE), upstream's policy with its
+      # standalone defaults: SQLite datastore, no federation, no nesting, so
+      # CloudNativePG stays off. Not FIPS-validated before ztwim 1.2.
+      ztwim: 'true'
+      ztwim-subscription-name: openshift-zero-trust-workload-identity-manager
+      ztwim-channel: stable-v1
+      ztwim-source: redhat-operators
+      ztwim-source-namespace: openshift-marketplace
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.
