@@ -1,0 +1,76 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: openshift-ai
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml — never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# The operator-install policy points at manifests/operator-install/, a nested kustomization that
+# renders the shared components/operator-install chart. Add further CRs as new policies[] entries
+# pointing at their own manifests/<dir> (a wildcarded dir picks up drop-in files automatically).
+# Keep placement.yaml OUT of manifests/ (a Placement inside a wildcarded dir would be wrapped in).
+# Several policies share placement.yaml.
+placementBindingDefaults:
+  name: binding-policy-openshift-ai
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: high
+  # Consolidate the raw Namespace into one generated ConfigurationPolicy; the first-class
+  # OperatorPolicy stays its own policy-template. Net: one Policy, two policy-templates.
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Placement authored by us (placement.yaml at the dir root, full fidelity); PG includes it and
+  # generates only the PlacementBinding.
+  placement:
+    placementPath: placement.yaml
+policies:
+  - name: policy-openshift-ai-operator-install
+    manifests:
+      - path: manifests/operator-install
+  # DSCInitialization and DataScienceCluster. Depends on the install because
+  # both CRDs arrive with the CSV; a ConfigurationPolicy naming an unknown
+  # kind reports Compliant while doing nothing.
+  - name: policy-openshift-ai-dsc
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-operator-install
+    manifests:
+      - path: manifests/dsc
+  - name: policy-openshift-ai-ready
+    remediationAction: inform
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: test/dsc-ready.yaml
+  # MCP catalog: Technology Preview, needs OpenShift 4.22+. The DSC component
+  # and the dashboard flag ship together because either alone is broken - the
+  # component without the flag is invisible, the flag without the component
+  # has a dead Deploy button.
+  - name: policy-openshift-ai-mcp-catalog
+    placement:
+      placementPath: placement-openshift-ai-mcp-catalog.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/mcp-catalog
+  # Agents catalog: Developer Preview, dashboard flag only.
+  - name: policy-openshift-ai-agents-cat
+    placement:
+      placementPath: placement-openshift-ai-agents-catalog.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/agents-catalog

@@ -1,0 +1,19 @@
+# Platform-level init. Monitoring is Managed so the RHOAI operator owns its
+# monitoring CRs.
+#
+# The metrics/traces config is deliberately absent: populating it triggers the
+# operator's observability cascade (MonitoringStack, ThanosQuerier, Perses,
+# tracing), which needs Tempo, OpenTelemetry and the Cluster Observability
+# Operator installed first. AutoShift has policies for all three - enable
+# those and patch this afterwards rather than up front.
+apiVersion: dscinitialization.opendatahub.io/v2
+kind: DSCInitialization
+metadata:
+  name: default-dsci
+spec:
+  applicationsNamespace: redhat-ods-applications
+  monitoring:
+    managementState: Managed
+  trustedCABundle:
+    customCABundle: ""
+    managementState: Managed

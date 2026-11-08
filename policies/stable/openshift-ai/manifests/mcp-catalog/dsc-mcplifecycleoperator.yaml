@@ -1,0 +1,33 @@
+# Backend for the MCP catalog. Without it the catalog still renders in the
+# dashboard but Deploy is greyed out, so this and the dashboard flag have to
+# go together - either alone gives you a broken half.
+#
+# Technology Preview. Two prerequisites, per "Working with the MCP catalog"
+# in the RHOAI 3.5 docs:
+#
+#   1. RHOAI 3.5 on OpenShift 4.22 or later (doc section 2.3).
+#   2. The MCP Gateway. OpenShift AI does not install it and it is outside
+#      the OpenShift AI operator lifecycle (doc chapter 1). Red Hat
+#      Connectivity Link 1.5 ships it: the Kuadrant operator deploys the MCP
+#      Gateway operator itself, so the connectivity-link policy on a 1.5
+#      channel (stable-1.5) provides it with no separate install.
+#
+# This policy does not install the MCP Gateway. Enabling the label without
+# Connectivity Link 1.5 gets you a catalog whose Deploy action does not work.
+#
+# Also note the MCPServer CRD is v1alpha1 with no backward compatibility
+# commitment; fields can change without a migration path.
+#
+# A partial DataScienceCluster. ACM musthave merges the listed fields and
+# leaves the rest of the object alone, so this coexists with the main DSC
+# manifest rather than replacing it. (The upstream Argo version of this needs
+# ServerSideApply=true to get the same behaviour; ConfigurationPolicy gives it
+# for free.)
+apiVersion: datasciencecluster.opendatahub.io/v2
+kind: DataScienceCluster
+metadata:
+  name: default-dsc
+spec:
+  components:
+    mcplifecycleoperator:
+      managementState: Managed
