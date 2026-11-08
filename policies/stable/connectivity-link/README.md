@@ -107,11 +107,18 @@ Subscription: requests `200m` CPU and `512Mi` memory, limits `200m` CPU and `2Gi
   CPU values are the shipped defaults, included to keep them.
 - **Harmless on 1.4,** where the shipped limit is enough.
 
+The same Subscription `config` also sets `AUTH_SERVICE_TIMEOUT=2s`. The Kuadrant WASM plugin's
+call to Authorino otherwise times out at 200 ms and, because it fails closed, answers 500 or 503
+under burst load while the backend is healthy. That is the workaround the RHOAI 3.4 and 3.5 release
+notes give for known issue RHOAIENG-71638.
+
 Check that OLM applied it:
 
 ```bash
 oc get deploy kuadrant-operator-controller-manager -n openshift-operators \
   -o jsonpath='{.spec.template.spec.containers[0].resources}{"\n"}'
+oc get deploy kuadrant-operator-controller-manager -n openshift-operators \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="AUTH_SERVICE_TIMEOUT")].value}{"\n"}'
 ```
 
 ## MCP Gateway

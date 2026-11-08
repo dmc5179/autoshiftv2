@@ -29,6 +29,14 @@ helmCharts:
         # 1.4. Set here, in the OperatorPolicy that owns the Subscription, rather than by
         # a second policy patching a field of a resource this one manages.
         config:
+          # AUTH_SERVICE_TIMEOUT: the Kuadrant WASM plugin's Authorino call times out
+          # at 200 ms by default and, with failureMode deny, returns 500/503 under burst
+          # load while the backend is healthy. 2s is the workaround in the RHOAI 3.4 and
+          # 3.5 release notes (known issue RHOAIENG-71638). OLM keeps Subscription env;
+          # a Deployment edit is reset.
+          env:
+            - name: AUTH_SERVICE_TIMEOUT
+              value: 2s
           resources:
             requests:
               cpu: 200m
