@@ -104,8 +104,6 @@ clusters:
       # RHOAI MaaS, model egress, and externally-hosted workloads
       # =======================================================================
       model-egress: 'false'
-      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
-      openshift-ai-maas-db-secret: maas-db-config
       # Deploy workloads that live in their own repositories, as ArgoCD
       # Applications. Needs config.gitopsWorkloads to say which.
       gitops-workloads: 'false'
@@ -326,6 +324,8 @@ clusters:
       # Turning it off stops that management and removes nothing, like most
       # AutoShift labels; MaaS keeps running until set to Removed by hand.
       openshift-ai-maas: 'false'
+      openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
+      openshift-ai-maas-db-secret: maas-db-config
 
       # =======================================================================
       # Openshift Ai Models
