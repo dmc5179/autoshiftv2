@@ -339,6 +339,10 @@ hubClusterSets:
       # reports Compliant — enabled, and silently doing nothing.
       leader-worker-set: 'true'
       connectivity-link: 'true'
+      # Connectivity Link 1.5. The RHOAI 3.5 MaaS documentation (s1.2) still names
+      # 1.4.x; 1.5 is a deliberate choice here. Its controller memory bug is handled
+      # by the Subscription override in the connectivity-link policy (CONNLINK-1878).
+      connectivity-link-channel: stable-1.5
       openshift-ai: 'true'
       openshift-ai-subscription-name: rhods-operator
       openshift-ai-channel: stable-3.x
