@@ -1,0 +1,54 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: open-webui
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml, never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-open-webui
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Open WebUI keeps users, chats and uploads on its PVC. Unplacing this policy must not delete
+  # them; removal stops reconciliation and leaves every object in place.
+  pruneObjectBehavior: None
+  placement:
+    placementPath: placement.yaml
+policies:
+  # Waits for Hermes to be Available with its API key Secret created: this policy copies that
+  # key, and until it exists the copy has nothing to read.
+  - name: policy-open-webui
+    dependencies:
+      - name: policy-hermes-agent-ready
+    manifests:
+      - path: manifests/open-webui.yaml
+  - name: policy-open-webui-ready
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-open-webui
+    manifests:
+      - path: test/open-webui-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Open WebUI is not Available, or the administrator password Secret
+            named by config.openWebui.adminSecretRef does not exist. With
+            adminEmail set the pod does not start without that Secret, which is
+            deliberate: the site is never reachable before its administrator
+            exists. Create it in the open-webui namespace with the password under
+            the configured key.

@@ -1,0 +1,70 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: hermes-agent
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml, never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# Several policies share placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-hermes-agent
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Hermes keeps everything it learns on its PVC: memory, skills, conversation history. Unplacing
+  # this policy, or turning the label off, must not delete that. With None, removal stops
+  # reconciliation and leaves every object in place, so deleting Hermes is a deliberate manual act.
+  pruneObjectBehavior: None
+  placement:
+    placementPath: placement.yaml
+policies:
+  # The workload. Waits for openshift-ai-models to report the model Ready, because the pod mints
+  # its MaaS key at startup against that model's subscription and exits if it cannot: started any
+  # earlier it would crash-loop until the model arrived.
+  - name: policy-hermes-agent
+    dependencies:
+      - name: policy-openshift-ai-models-ready
+    manifests:
+      - path: manifests/hermes-agent.yaml
+  # inform: can this namespace's ServiceAccounts mint a key for the chosen model at all? Not
+  # dependent on the workload, so a narrowed accessGroups shows up before anything is deployed.
+  - name: policy-hermes-agent-access
+    remediationAction: inform
+    consolidateManifests: false
+    manifests:
+      - path: test/hermes-agent-access.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Hermes cannot mint a Models-as-a-Service key for its model. The pod
+            would exit at startup with a 403 from maas-api. Add
+            system:serviceaccounts:<hermes namespace> to that model's
+            config.openshiftAiModels.models[].accessGroups, or check that the
+            model's MaaSSubscription exists.
+  # inform: did Hermes come up, and did its bootstrap create the API key Open WebUI depends on.
+  - name: policy-hermes-agent-ready
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-hermes-agent
+    manifests:
+      - path: test/hermes-agent-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Hermes is not Available, or its hermes-api-key Secret does not exist
+            yet. The pod mints its Models-as-a-Service key and creates that
+            Secret at startup, then exits if either step fails, so the reason is
+            in its log: oc logs deploy/hermes-agent -n hermes. A 403 there means
+            accessGroups; no HTTP response means the MaaS gateway is unreachable.

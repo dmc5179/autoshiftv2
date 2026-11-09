@@ -1,0 +1,506 @@
+# Hermes Agent: an agent harness that does its thinking with a model served through Red Hat
+# OpenShift AI Models-as-a-Service (MaaS), and exposes an OpenAI-compatible API for chat clients
+# such as Open WebUI.
+#
+# Configuration is config.hermesAgent. The only required key is `model`, the name of an entry in
+# config.openshiftAiModels.models. Everything Hermes needs to reach that model is derived, not
+# repeated, so the two policies cannot disagree:
+#   - the request model id, publishers/<openshiftAiModels.namespace>/models/<model>. Requests
+#     route on that id in the body; the bare model name returns 404.
+#   - the subscription it mints against, <model>-default, which openshift-ai-models creates.
+#   - the gateway hostname, read from the Gateway's HTTPS listener on the managed cluster.
+#   - the CA that signs the gateway certificate, copied from openshift-config-managed on the
+#     managed cluster, so a certificate rotation is followed and nothing is committed to git.
+#
+# Credentials: none come from this policy. The pod mints its MaaS key with its own ServiceAccount
+# token, and creates the hermes-api-key Secret for Open WebUI on first start. See the bootstrap
+# script below for why both live in the pod rather than here.
+#
+# Data safety: pruneObjectBehavior None (policy-generator-config.yaml). The Deployment is
+# mustonlyhave because musthave merges into containers[] and would silently never apply an image
+# or env change; the PVC and Namespace are musthave so their server-set fields are left alone.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $h := (index $cfg "hermesAgent" | default dict) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $model := (dig "model" "" $h) hub}}
+  {{hub- if not $model hub}}{{hub fail "hermes-agent: config.hermesAgent.model is required, the name of a model in config.openshiftAiModels.models" hub}}{{hub- end hub}}
+  {{hub- $modelNs := (dig "namespace" "" $m) hub}}
+  {{hub- if not $modelNs hub}}{{hub fail "hermes-agent: config.openshiftAiModels.namespace is required; Hermes reaches its model through openshift-ai-models" hub}}{{hub- end hub}}
+  {{hub- $found := false hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $model hub}}{{hub- $found = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $found hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.model %s is not a model in config.openshiftAiModels.models" $model) hub}}{{hub- end hub}}
+  {{hub- $ns := (dig "namespace" "hermes" $h) hub}}
+  {{hub- $image := (dig "image" "quay.io/aicatalyst/hermes-hermes-agent@sha256:1eb780739aeeb92e7c8f416ae57a0307405081f7fa0610fcffeac6914ea1ad60" $h) hub}}
+  {{hub- $ttl := (dig "keyTtl" "720h" $h) hub}}
+  {{hub- $size := (dig "storageSize" "10Gi" $h) hub}}
+  {{hub- $sc := (dig "storageClass" "" $h) hub}}
+  {{hub- $ctx := (dig "contextLength" "" $h | toString) hub}}
+  {{hub- $gwName := (dig "gateway" "name" "maas-default-gateway" $m) hub}}
+  {{hub- $gwNs := (dig "gateway" "namespace" "openshift-ingress" $m) hub}}
+  {{- $gw := (lookup "gateway.networking.k8s.io/v1" "Gateway" "{{hub $gwNs hub}}" "{{hub $gwName hub}}") | default dict }}
+  {{- $host := "" }}
+  {{- range $l := (dig "spec" "listeners" (list) $gw) }}
+  {{- if and (not $host) (eq (dig "protocol" "" $l) "HTTPS") }}{{- $host = (dig "hostname" "" $l) }}{{- end }}
+  {{- end }}
+  {{- if not $host }}{{ fail "hermes-agent: no HTTPS listener hostname on Gateway {{hub $gwNs hub}}/{{hub $gwName hub}}; check policy-openshift-ai-maas-ready" }}{{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: hermes-agent
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: hermes-agent
+        namespace: '{{hub $ns hub}}'
+  # Lets the bootstrap create the hermes-api-key Secret once and read it on every start.
+  # create cannot be restricted to a resourceName, so it is scoped to this namespace instead.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: hermes-api-key
+        namespace: '{{hub $ns hub}}'
+      rules:
+        - apiGroups:
+            - ''
+          resources:
+            - secrets
+          resourceNames:
+            - hermes-api-key
+          verbs:
+            - get
+        - apiGroups:
+            - ''
+          resources:
+            - secrets
+          verbs:
+            - create
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: hermes-api-key
+        namespace: '{{hub $ns hub}}'
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: hermes-api-key
+      subjects:
+        - kind: ServiceAccount
+          name: hermes-agent
+          namespace: '{{hub $ns hub}}'
+  # Everything Hermes learns: memory, skills, conversation history, in SQLite. ReadWriteOnce
+  # with one replica and a Recreate strategy; two pods must never open this database.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: hermes-data
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: hermes-agent
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: '{{hub $size hub}}'
+        {{hub- if $sc hub}}
+        storageClassName: '{{hub $sc hub}}'
+        {{hub- end hub}}
+  # The CA bundle that signs the MaaS gateway certificate. The gateway serves the default
+  # IngressController certificate, and the ingress operator publishes its signer here. The
+  # build-trust-bundle initContainer appends it to the system trust store; on its own it would
+  # replace that store and break every publicly signed endpoint.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: hermes-ingress-ca
+        namespace: '{{hub $ns hub}}'
+      data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'
+  # The startup wrapper. A ConfigMap change does not restart the pod; bump
+  # autoshift.io/hermes-bootstrap-revision on the Deployment's pod template when this changes.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: hermes-bootstrap
+        namespace: '{{hub $ns hub}}'
+      data:
+        hermes-bootstrap.sh: |
+          #!/usr/bin/env bash
+          # Hermes startup wrapper, delivered by the AutoShift hermes-agent policy.
+          #
+          # Runs as the container command, then execs the image's own entrypoint. It does
+          # two things the policy cannot do itself, because RHACM templates have no
+          # random-number or hashing functions:
+          #
+          #   1. API_SERVER_KEY, the key Open WebUI presents to Hermes. Read from the
+          #      hermes-api-key Secret; on first start the pod creates that Secret with a
+          #      random key. The key is generated in the cluster and never passes through
+          #      Git, a values file or a command line. A Role grants this ServiceAccount
+          #      get on that one Secret and create on Secrets in its own namespace.
+          #   2. The MaaS API key. Minted with this pod's ServiceAccount token, which
+          #      maas-api accepts because the model's accessGroups include
+          #      system:serviceaccounts:<namespace>. The token is the auto-mounted one: a
+          #      token requested with an explicit audience is rejected with a 401.
+          #
+          # Both keys go into the process environment, the only place Hermes reads them.
+          # An initContainer could not do this: env is resolved before the container
+          # starts, so a key written to a file or a Secret by an initContainer arrives one
+          # restart late. For the same reason the MaaS key cannot be refreshed in a
+          # running pod, so its TTL must exceed the longest expected pod lifetime; a
+          # restart mints a new one.
+          #
+          # Every secret travels on stdin. Nothing below prints a key.
+          set -euo pipefail
+          SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+          NAMESPACE="$(cat "${SA_DIR}/namespace")"
+          KUBE_API="${KUBE_API:-https://kubernetes.default.svc}"
+          API_KEY_SECRET="${HERMES_API_KEY_SECRET:-hermes-api-key}"
+          MAAS_API_BASE="${MAAS_API_BASE:?MAAS_API_BASE must be set}"
+          MAAS_SUBSCRIPTION="${MAAS_SUBSCRIPTION:?MAAS_SUBSCRIPTION must be set}"
+          MAAS_KEY_TTL="${MAAS_KEY_TTL:-720h}"
+          ATTEMPTS="${MAAS_MINT_ATTEMPTS:-10}"
+          log() { printf '[bootstrap] %s\n' "$*" >&2; }
+          # kube METHOD PATH: call the Kubernetes API as this ServiceAccount. A request
+          # body, when there is one, is read from stdin. Prints the body, then the HTTP
+          # status on its own final line (000 when there was no response at all).
+          kube() {
+              local args=(--silent --show-error --max-time 20 --cacert "${SA_DIR}/ca.crt"
+                          -H "Authorization: Bearer $(cat "${SA_DIR}/token")"
+                          -X "$1" --write-out '\n%{http_code}')
+              if [[ "$1" == POST ]]; then
+                  args+=(-H 'Content-Type: application/json' --data-binary @-)
+              fi
+              curl "${args[@]}" "${KUBE_API}$2" 2>/dev/null || printf '\n000'
+          }
+          # --- 1. API_SERVER_KEY ------------------------------------------------------
+          secret_path="/api/v1/namespaces/${NAMESPACE}/secrets/${API_KEY_SECRET}"
+          api_key=""
+          for _ in 1 2; do
+              resp="$(kube GET "$secret_path" </dev/null)"
+              code="${resp##*$'\n'}"
+              if [[ "$code" == 200 ]]; then
+                  api_key="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import base64, json, sys
+          print(base64.b64decode(json.load(sys.stdin)["data"]["API_SERVER_KEY"]).decode())')"
+                  log "API_SERVER_KEY read from Secret ${API_KEY_SECRET}"
+                  break
+              elif [[ "$code" == 404 ]]; then
+                  created="$(python3 -c '
+          import base64, json, secrets, sys
+          key = secrets.token_hex(32)
+          print(json.dumps({
+              "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+              "metadata": {"name": sys.argv[1], "labels": {
+                  "app.kubernetes.io/name": "hermes-agent",
+                  "app.kubernetes.io/managed-by": "hermes-bootstrap"}},
+              "data": {"API_SERVER_KEY": base64.b64encode(key.encode()).decode()}}))' "$API_KEY_SECRET" \
+                      | kube POST "/api/v1/namespaces/${NAMESPACE}/secrets")"
+                  code="${created##*$'\n'}"
+                  # 201: created. 409: another start won the race. Either way, read it back.
+                  if [[ "$code" != 201 && "$code" != 409 ]]; then
+                      log "FATAL: cannot create Secret ${API_KEY_SECRET} (HTTP ${code}). Check the hermes-api-key Role."
+                      exit 1
+                  fi
+                  log "created Secret ${API_KEY_SECRET} with a new random API_SERVER_KEY"
+              else
+                  log "FATAL: cannot read Secret ${API_KEY_SECRET} (HTTP ${code}). Check the hermes-api-key Role."
+                  exit 1
+              fi
+          done
+          if [[ -z "$api_key" ]]; then
+              log "FATAL: Secret ${API_KEY_SECRET} has no API_SERVER_KEY"
+              exit 1
+          fi
+          export API_SERVER_KEY="$api_key"
+          unset api_key resp created
+          # --- 2. MaaS API key --------------------------------------------------------
+          curl_tls=()
+          if [[ -n "${SSL_CERT_FILE:-}" && -r "${SSL_CERT_FILE}" ]]; then
+              curl_tls=(--cacert "$SSL_CERT_FILE")
+          fi
+          body="$(python3 -c '
+          import json, os
+          print(json.dumps({"name": "hermes-agent",
+                            "description": "Minted at pod start by the AutoShift hermes-agent policy",
+                            "expiresIn": os.environ["MAAS_KEY_TTL"],
+                            "subscription": os.environ["MAAS_SUBSCRIPTION"]}))')"
+          maas_key=""
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+              resp="$(printf '%s' "$body" | curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
+                  --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
+                  -H "Authorization: Bearer $(cat "${SA_DIR}/token")" \
+                  -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
+              code="${resp##*$'\n'}"
+              if [[ "$code" == 200 || "$code" == 201 ]]; then
+                  maas_key="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import json, sys
+          print(json.load(sys.stdin).get("key", ""))')"
+                  if [[ -n "$maas_key" ]]; then
+                      log "minted MaaS key (subscription ${MAAS_SUBSCRIPTION}, ttl ${MAAS_KEY_TTL})"
+                      break
+                  fi
+                  log "attempt ${attempt}/${ATTEMPTS}: HTTP ${code} but no key in the response"
+              elif [[ "$code" == 000 ]]; then
+                  # No HTTP response: DNS, TLS or connectivity. Expected while a cold
+                  # cluster's gateway comes up, which is what this retry loop is for.
+                  log "attempt ${attempt}/${ATTEMPTS}: no HTTP response from ${MAAS_API_BASE}"
+              else
+                  log "attempt ${attempt}/${ATTEMPTS}: mint rejected, HTTP ${code}"
+              fi
+              if (( attempt < ATTEMPTS )); then
+                  sleep $(( attempt < 6 ? attempt * 5 : 30 ))
+              fi
+          done
+          if [[ -z "$maas_key" ]]; then
+              # Exit rather than start keyless: a keyless Hermes answers 401 from its
+              # model, which looks like a MaaS outage rather than a startup failure.
+              log "FATAL: no MaaS key after ${ATTEMPTS} attempts. Check that subscription ${MAAS_SUBSCRIPTION} exists and that its accessGroups include system:serviceaccounts:${NAMESPACE}."
+              exit 1
+          fi
+          export OPENAI_API_KEY="$maas_key"
+          unset maas_key resp body
+          # --- hand off ---------------------------------------------------------------
+          # The image's own ENTRYPOINT; the container's args supply its CMD.
+          exec /usr/local/bin/tini -g -- /opt/hermes/docker/entrypoint-openshift.sh "$@"
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: hermes-agent
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: hermes-agent
+      spec:
+        replicas: 1
+        strategy:
+          type: Recreate
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: hermes-agent
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: hermes-agent
+            annotations:
+              autoshift.io/hermes-bootstrap-revision: '1'
+          spec:
+            serviceAccountName: hermes-agent
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+            initContainers:
+              # SSL_CERT_FILE replaces the trust store rather than adding to it, so the bundle
+              # must hold the public CAs as well as the ingress CA.
+              - name: build-trust-bundle
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                command:
+                  - /bin/sh
+                  - -c
+                  - cat /etc/pki/tls/certs/ca-bundle.crt /ingress-ca/ca-bundle.crt > /bundle/ca-bundle.crt
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 32Mi
+                  limits:
+                    cpu: 100m
+                    memory: 64Mi
+                volumeMounts:
+                  - name: ca
+                    mountPath: /bundle
+                  - name: ingress-ca
+                    mountPath: /ingress-ca
+                    readOnly: true
+              # Hermes reads its model from $HERMES_HOME/config.yaml on the PVC, and the image
+              # seeds that file only when it is absent, so it would otherwise keep a stale model
+              # forever. Rewritten at every start from the values below. They are in the pod
+              # template, so changing them rolls the pod: RHACM templates have no hash function
+              # to emulate the hashed-ConfigMap restart that Kustomize would provide.
+              - name: render-config
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                command:
+                  - python3
+                  - -c
+                  - |
+                    import json, os
+                    model = dict(provider="custom", base_url=os.environ["HERMES_LLM_BASE_URL"], default=os.environ["HERMES_LLM_MODEL"])
+                    if os.environ.get("HERMES_LLM_CONTEXT_LENGTH"):
+                        model["context_length"] = int(os.environ["HERMES_LLM_CONTEXT_LENGTH"])
+                    cfg = dict(model=model, database=dict(journal_mode="wal"))
+                    with open(os.path.join(os.environ["HERMES_HOME"], "config.yaml"), "w") as f:
+                        json.dump(cfg, f, indent=2)
+                    print("rendered config.yaml for", model["default"])
+                env:
+                  - name: HERMES_HOME
+                    value: /opt/data
+                  - name: HERMES_LLM_BASE_URL
+                    value: 'https://{{ $host }}/v1'
+                  - name: HERMES_LLM_MODEL
+                    value: 'publishers/{{hub $modelNs hub}}/models/{{hub $model hub}}'
+                  - name: HERMES_LLM_CONTEXT_LENGTH
+                    value: '{{hub $ctx hub}}'
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                  limits:
+                    cpu: 200m
+                    memory: 256Mi
+                volumeMounts:
+                  - name: data
+                    mountPath: /opt/data
+            containers:
+              - name: hermes
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                # The bootstrap reproduces the image's own ENTRYPOINT; args supply its CMD.
+                command:
+                  - /bin/bash
+                  - /opt/hermes-bootstrap/hermes-bootstrap.sh
+                args:
+                  - gateway
+                  - run
+                env:
+                  - name: MAAS_API_BASE
+                    value: 'https://{{ $host }}'
+                  - name: MAAS_SUBSCRIPTION
+                    value: '{{hub $model hub}}-default'
+                  # Must exceed the longest expected pod lifetime: the key is pinned in the
+                  # process environment and a running pod cannot replace it.
+                  - name: MAAS_KEY_TTL
+                    value: '{{hub $ttl hub}}'
+                  - name: HERMES_API_KEY_SECRET
+                    value: hermes-api-key
+                  # Without this the gateway starts but binds no listener, and every probe fails.
+                  - name: API_SERVER_ENABLED
+                    value: 'true'
+                  - name: API_SERVER_PORT
+                    value: '8642'
+                  - name: API_SERVER_HOST
+                    value: 0.0.0.0
+                  - name: HERMES_HOME
+                    value: /opt/data
+                  - name: PYTHONUNBUFFERED
+                    value: '1'
+                  - name: SSL_CERT_FILE
+                    value: /etc/hermes/ca/ca-bundle.crt
+                  - name: REQUESTS_CA_BUNDLE
+                    value: /etc/hermes/ca/ca-bundle.crt
+                ports:
+                  - name: api
+                    containerPort: 8642
+                    protocol: TCP
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                # Generous: first start pulls a large image and the bootstrap retries the mint
+                # while a cold cluster's gateway comes up.
+                startupProbe:
+                  httpGet:
+                    path: /health
+                    port: api
+                  periodSeconds: 10
+                  failureThreshold: 60
+                  timeoutSeconds: 5
+                readinessProbe:
+                  httpGet:
+                    path: /health
+                    port: api
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: api
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                resources:
+                  requests:
+                    cpu: 500m
+                    memory: 2Gi
+                  limits:
+                    cpu: '2'
+                    memory: 4Gi
+                volumeMounts:
+                  - name: data
+                    mountPath: /opt/data
+                  - name: ca
+                    mountPath: /etc/hermes/ca
+                    readOnly: true
+                  - name: bootstrap
+                    mountPath: /opt/hermes-bootstrap
+                    readOnly: true
+                  - name: tmp
+                    mountPath: /tmp
+            volumes:
+              - name: data
+                persistentVolumeClaim:
+                  claimName: hermes-data
+              - name: ingress-ca
+                configMap:
+                  name: hermes-ingress-ca
+                  items:
+                    - key: ca-bundle.crt
+                      path: ca-bundle.crt
+              - name: ca
+                emptyDir: {}
+              - name: bootstrap
+                configMap:
+                  name: hermes-bootstrap
+                  defaultMode: 365
+              - name: tmp
+                emptyDir: {}
+  # In-cluster only: Open WebUI connects here. Hermes' API is not published outside the cluster.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: hermes-agent
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: hermes-agent
+      spec:
+        selector:
+          app.kubernetes.io/name: hermes-agent
+        ports:
+          - name: api
+            port: 8642
+            targetPort: api
+            protocol: TCP

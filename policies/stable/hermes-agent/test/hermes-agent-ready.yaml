@@ -1,0 +1,28 @@
+# Did Hermes come up, and did its bootstrap finish?
+#
+# inform-only. The enforcing policy goes Compliant as soon as the Deployment matches its template,
+# which says nothing about whether the pod minted its MaaS key, created the API key Secret, and
+# passed its probes. Each of those can fail on its own, and the bootstrap exits on any of them, so
+# availableReplicas is the honest signal. The Secret check covers the step Open WebUI depends on.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $h := (index $cfg "hermesAgent" | default dict) hub}}
+  {{hub- if not (dig "model" "" $h) hub}}{{hub fail "hermes-agent: config.hermesAgent.model is required, the name of a model in config.openshiftAiModels.models" hub}}{{hub- end hub}}
+  {{hub- $ns := (dig "namespace" "hermes" $h) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: hermes-agent
+        namespace: '{{hub $ns hub}}'
+      status:
+        availableReplicas: 1
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: hermes-api-key
+        namespace: '{{hub $ns hub}}'

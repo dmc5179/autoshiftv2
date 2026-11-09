@@ -1,0 +1,45 @@
+# Spoke-side objects the hermes-agent and open-webui policies read on the managed cluster.
+# Values are deliberately fake and low-entropy: this directory is not allowlisted in
+# .gitleaks.toml.
+#
+# The MaaS gateway, as openshift-ai-maas creates it. hermes-agent reads the hostname of its
+# HTTPS listener to build the gateway URL.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: maas-default-gateway
+  namespace: openshift-ingress
+spec:
+  gatewayClassName: openshift-default
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: maas.apps.test-cluster.test.example.com
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: maas.apps.test-cluster.test.example.com
+---
+# Published by the ingress operator on every OpenShift cluster: the CA of the default
+# IngressController certificate, which the MaaS gateway serves. hermes-agent copies it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: default-ingress-cert
+  namespace: openshift-config-managed
+data:
+  ca-bundle.crt: |
+    -----BEGIN CERTIFICATE-----
+    ZmFrZS1pbmdyZXNzLWNhLWZvci10ZXN0cw==
+    -----END CERTIFICATE-----
+---
+# Created by the hermes-agent pod on first start. open-webui copies API_SERVER_KEY from it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hermes-api-key
+  namespace: hermes
+type: Opaque
+data:
+  API_SERVER_KEY: ZmFrZS1hcGkta2V5

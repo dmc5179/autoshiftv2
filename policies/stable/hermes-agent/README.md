@@ -1,0 +1,98 @@
+# hermes-agent
+
+Deploys the Hermes Agent harness from Nous Research, which does its
+thinking with a model served through Red Hat OpenShift AI Models-as-a-Service (MaaS). Hermes
+exposes an OpenAI-compatible API in the cluster, which the `open-webui` policy connects to.
+
+Hermes is an agent rather than a chat endpoint. It keeps memory, learns reusable skills and runs
+tools, and it stores all of that on a persistent volume.
+
+## Configuration
+
+Enablement label `autoshift.io/hermes-agent`, plus `config.hermesAgent`:
+
+```yaml
+config:
+  hermesAgent:
+    model: 'granite-4-tiny-gpu'      # required: a model name in config.openshiftAiModels.models
+    namespace: 'hermes'
+    keyTtl: '720h'
+    storageSize: '10Gi'
+    storageClass: 'gp3-csi'
+```
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `model` | | Required. The name of a model in `config.openshiftAiModels.models`, not a request model id |
+| `namespace` | `hermes` | Must match the ServiceAccount group in that model's `accessGroups` |
+| `image` | the verified pin | Hermes image, pinned by digest |
+| `keyTtl` | `720h` | Lifetime of the MaaS key the pod mints. See [Key lifetime](#key-lifetime) |
+| `storageSize` | `10Gi` | Memory, skills and conversation history |
+| `storageClass` | cluster default | Set only to override the default StorageClass |
+| `contextLength` | read from the gateway | Set only when Hermes cannot read the model's context window |
+
+The rest is derived, so it cannot disagree with `openshift-ai-models`:
+
+| Hermes needs | Derived from |
+|--------------|--------------|
+| Request model id | `publishers/<openshiftAiModels.namespace>/models/<model>`. The bare name returns 404 |
+| Subscription to mint against | `<model>-default`, which `openshift-ai-models` creates |
+| Gateway URL | The HTTPS listener hostname of `openshiftAiModels.gateway`, on the managed cluster |
+| Gateway CA | `openshift-config-managed/default-ingress-cert`, copied on the managed cluster |
+
+## Requirements
+
+- `openshift-ai-models` serving the chosen model. `policy-hermes-agent` depends on
+  `policy-openshift-ai-models-ready`.
+- That model's `accessGroups` must include `system:serviceaccounts:<namespace>`, or a broader
+  group such as `system:serviceaccounts` or `system:authenticated`. The default
+  `system:authenticated` qualifies; a narrowed list must name the Hermes group explicitly.
+- Hermes sends about 14,000 prompt tokens on every turn, because tool definitions, skills and
+  memory travel with each request. Size the model's `tokenRateLimit` and context window for that.
+
+## Policies
+
+| Policy | Mode | Does |
+|--------|------|------|
+| `policy-hermes-agent` | enforce | Namespace, ServiceAccount, the `hermes-api-key` Role, PVC, gateway CA, bootstrap script, Deployment and Service |
+| `policy-hermes-agent-access` | inform | The model grants the ServiceAccounts in this namespace, and its subscription exists |
+| `policy-hermes-agent-ready` | inform | The Deployment is Available and its `hermes-api-key` Secret exists |
+
+## Credentials
+
+None come from git or from this policy. RHACM policy templates have no random-number function,
+so the pod handles both credentials itself at startup, in a bootstrap script that then starts
+Hermes:
+
+- **MaaS key.** Minted with the pod's own ServiceAccount token. A restart mints a new one, and
+  no person's credential is involved. The token is the automatically mounted one: a token
+  requested with an explicit audience is rejected with a 401.
+- **Hermes API key** (`API_SERVER_KEY`), which Open WebUI presents to Hermes. On first start the
+  pod creates the `hermes-api-key` Secret with a random value, then reads it on every start. A
+  Role grants `get` on that Secret and `create` on Secrets in this namespace.
+
+Both keys exist only in the process environment and in that one Secret.
+
+## Key lifetime
+
+The MaaS key is fixed for the life of the pod: it lives in the process environment, and a
+running process cannot replace it. `keyTtl` must therefore exceed the longest expected pod
+lifetime, not the restart interval. A short value expires in a running pod, after which Hermes
+answers every request with a 401 from its model, and no probe treats that as unhealthy.
+
+## Updating
+
+The Deployment is `mustonlyhave`: with `musthave`, an image or environment change merges into
+`containers[]` and is silently never applied. Model settings live in the pod template, so changing
+`model` rolls the pod. A ConfigMap change does not roll a pod, because RHACM templates have no hash
+function. After changing the bootstrap script in `manifests/hermes-agent.yaml`, increment the
+`autoshift.io/hermes-bootstrap-revision` annotation on the pod template in the same file.
+
+## Data safety
+
+`pruneObjectBehavior: None`. Turning the label off stops reconciliation and deletes nothing,
+because the PVC holds everything Hermes has learned. Deleting Hermes is a deliberate manual step:
+delete the namespace.
+
+All users of a connected Open WebUI share one Hermes: its skills, its built-in memory and its
+history. Deploy one Hermes per team where that matters.

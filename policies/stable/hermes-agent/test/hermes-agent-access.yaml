@@ -1,0 +1,37 @@
+# Can Hermes mint a Models-as-a-Service key for its model?
+#
+# inform-only, and deliberately not dependent on the workload: a narrowed accessGroups is the
+# failure that is easy to cause and hard to see. maas-api checks group membership only, and the
+# pod's ServiceAccount is a member of system:serviceaccounts:<namespace>, of
+# system:serviceaccounts and of system:authenticated. If the model grants none of those, the pod
+# exits at startup with a 403 from maas-api, which looks like a gateway problem from the outside.
+#
+# The group check is resolved on the hub from the same config both policies read, so it reports
+# before anything is deployed. The object below then asserts the subscription actually exists.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $h := (index $cfg "hermesAgent" | default dict) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $model := (dig "model" "" $h) hub}}
+  {{hub- if not $model hub}}{{hub fail "hermes-agent: config.hermesAgent.model is required, the name of a model in config.openshiftAiModels.models" hub}}{{hub- end hub}}
+  {{hub- $ns := (dig "namespace" "hermes" $h) hub}}
+  {{hub- $maasNs := (dig "maasNamespace" "models-as-a-service" $m) hub}}
+  {{hub- $entry := dict hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $model hub}}{{hub- $entry = $x hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $entry hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.model %s is not a model in config.openshiftAiModels.models" $model) hub}}{{hub- end hub}}
+  {{hub- $granted := list "system:authenticated" "system:serviceaccounts" (printf "system:serviceaccounts:%s" $ns) hub}}
+  {{hub- $ok := false hub}}
+  {{hub- range $g := (dig "accessGroups" (list "system:authenticated") $entry) hub}}
+  {{hub- if has $g $granted hub}}{{hub- $ok = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $ok hub}}{{hub fail (printf "hermes-agent: model %s does not grant system:serviceaccounts:%s in its accessGroups, so Hermes cannot mint a key; add that group" $model $ns) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSSubscription
+      metadata:
+        name: '{{hub $model hub}}-default'
+        namespace: '{{hub $maasNs hub}}'

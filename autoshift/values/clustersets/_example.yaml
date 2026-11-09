@@ -187,6 +187,52 @@ hubClusterSets:
             toolCallParser: 'granite4'
 
       # =======================================================================
+      # hermes-agent: the Hermes Agent harness, thinking with a model served through
+      # Models-as-a-Service (DATA; the ENABLE flag is the hermes-agent label below).
+      # Hermes derives its request model id, subscription, gateway and CA from
+      # openshiftAiModels and the managed cluster, so only the model name is required. It
+      # mints its own MaaS key with its ServiceAccount, so that model's accessGroups must
+      # include system:serviceaccounts:<namespace>; policy-hermes-agent-access reports it.
+      # =======================================================================
+      hermesAgent:
+        # Required. The name of a model in openshiftAiModels.models, not a request model id:
+        # the publishers/<namespace>/models/<name> form is derived. Example value.
+        model: 'granite-4-tiny-gpu'
+        namespace: 'hermes'                      # default hermes
+        # Default: the pinned image the policy was verified with.
+        image: 'quay.io/aicatalyst/hermes-hermes-agent@sha256:1eb780739aeeb92e7c8f416ae57a0307405081f7fa0610fcffeac6914ea1ad60'
+        # MaaS key lifetime. Must exceed the longest expected pod lifetime: the key is fixed
+        # for the life of the pod, and a restart mints a new one.
+        keyTtl: '720h'
+        storageSize: '10Gi'                      # Hermes memory, skills and history
+        storageClass: 'gp3-csi'                  # example; omit for the cluster default
+        # Optional. Only when Hermes cannot read the model's context window from the gateway.
+        # Hermes sends about 14k prompt tokens per turn, so the window must be at least 32k.
+        contextLength: '131072'
+
+      # =======================================================================
+      # open-webui: Open WebUI as the chat front end for hermes-agent (DATA; the ENABLE flag
+      # is the open-webui label below). It connects to Hermes in-cluster and copies the API
+      # key Hermes generates, so it needs no credentials of its own from git.
+      # =======================================================================
+      openWebui:
+        namespace: 'open-webui'                  # default open-webui
+        # Default: v0.12.5, the release verified to run under the restricted-v2 SCC.
+        image: 'ghcr.io/open-webui/open-webui@sha256:03443b8de6b617da9d900edd09b4bf1cb0ddbfdcba6afb42c548336a0b821ded'
+        storageSize: '10Gi'                      # users, chats, uploads, vector store
+        storageClass: 'gp3-csi'                  # example; omit for the cluster default
+        # Optional public hostname. Default: <namespace>.<cluster ingress domain>.
+        routeHost: 'chat.apps.example.com'
+        # Optional, strongly recommended. Open WebUI makes the first account to sign up the
+        # administrator. With adminEmail set, it creates that account at first start from a
+        # password in a Secret an administrator creates in the namespace, out of band, before
+        # the site is reachable. Credentials never come from git.
+        adminEmail: 'admin@example.com'
+        adminSecretRef:
+          name: 'open-webui-admin'               # default open-webui-admin
+          key: 'password'                        # default password
+
+      # =======================================================================
       # openshift-lightspeed — the model the console assistant uses (DATA; the ENABLE flag is
       # the openshift-lightspeed label below). The provider is the MaaS gateway on the same
       # cluster, discovered from the cluster ingress domain.
@@ -2669,3 +2715,13 @@ hubClusterSets:
       # only until config.ztwim.defaultX509Validity expires. policy-ztwim-operand-drift reports
       # when this is needed and stays Compliant when it is not.
       ztwim-operand-reconcile: 'false'
+
+      # =======================================================================
+      # Hermes Agent
+      # =======================================================================
+      hermes-agent: 'false'
+
+      # =======================================================================
+      # Open Webui
+      # =======================================================================
+      open-webui: 'false'

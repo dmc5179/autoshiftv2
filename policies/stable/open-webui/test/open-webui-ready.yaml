@@ -1,0 +1,31 @@
+# Did Open WebUI come up?
+#
+# inform-only. The enforcing policy goes Compliant once the Deployment matches its template; the
+# pod can still be waiting on the administrator password Secret, seeding models, or failing a
+# probe. When adminEmail is set, the Secret is checked here too, because a missing one is the
+# most likely reason the pod is not running: the pod deliberately does not start without it.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $o := (index $cfg "openWebui" | default dict) hub}}
+  {{hub- $h := (index $cfg "hermesAgent" | default dict) hub}}
+  {{hub- if not (dig "model" "" $h) hub}}{{hub fail "open-webui: config.hermesAgent is required; Open WebUI connects to the Hermes the hermes-agent policy deploys" hub}}{{hub- end hub}}
+  {{hub- $ns := (dig "namespace" "open-webui" $o) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: open-webui
+        namespace: '{{hub $ns hub}}'
+      status:
+        availableReplicas: 1
+  {{hub- if (dig "adminEmail" "" $o) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: '{{hub (dig "adminSecretRef" "name" "open-webui-admin" $o) hub}}'
+        namespace: '{{hub $ns hub}}'
+  {{hub- end hub}}
