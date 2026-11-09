@@ -441,7 +441,7 @@ hubClusterSets:
       # Second step of the rollout: turn on only after policy-openshell-gateway-ready is
       # Compliant and one hand-made sandbox has run. Sandboxes then share the
       # granite-4-tiny-gpu token budget with Hermes and everyone else.
-      openshell-maas: 'false'
+      openshell-maas: 'true'
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.
