@@ -31,8 +31,8 @@ hubClusterSets:
       # Cluster autoscaler. Totals for the whole cluster: 3 control plane
       # (m6i.2xlarge, 8 vCPU / 32 GiB) + up to 6 workers (m6i.4xlarge,
       # 16 / 64) + up to 2 GPU nodes (g6.xlarge, 4 / 16) = 11 nodes, 128
-      # cores, 512 GiB. Workers 3-6. GPU is left out until gpu-nodes sets
-      # cluster-api/accelerator and stops enforcing spec.replicas.
+      # cores, 512 GiB. Workers 3-6, GPU 1-2 (nvidia-l4, the accelerator
+      # gpu-nodes derives for g6).
       clusterAutoscaler:
         resourceLimits:
           maxNodesTotal: 12
@@ -42,10 +42,17 @@ hubClusterSets:
           memory:
             min: 4
             max: 512
+          gpus:
+            - type: nvidia-l4
+              min: 0
+              max: 2
         machineSets:
           worker:
             minReplicas: 3
             maxReplicas: 6
+          gpu:
+            minReplicas: 1
+            maxReplicas: 2
       openshiftAiModels:
         namespace: 'llm'
         maasNamespace: 'models-as-a-service'
