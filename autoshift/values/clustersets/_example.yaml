@@ -187,6 +187,40 @@ hubClusterSets:
             toolCallParser: 'granite4'
 
       # =======================================================================
+      # cluster-autoscaler: the ClusterAutoscaler and per-MachineSet MachineAutoscalers
+      # (DATA; the ENABLE flag is the cluster-autoscaler label below).
+      # resourceLimits is required and is the cost ceiling: totals for the WHOLE cluster,
+      # control plane included. machineSets ranges apply to EACH MachineSet of a class, so
+      # one worker MachineSet per zone gets min x zones workers. Classes: worker, infra,
+      # gpu (storage MachineSets are never autoscaled). See the policy README for GPU.
+      # =======================================================================
+      clusterAutoscaler:
+        resourceLimits:
+          maxNodesTotal: 12
+          cores:
+            min: 8
+            max: 128
+          memory:                     # GiB
+            min: 4
+            max: 512
+          # gpus:                     # type must match the GPU MachineSet's
+          #   - type: nvidia-l4       # cluster-api/accelerator label
+          #     min: 0
+          #     max: 2
+        # scaleDown:                  # defaults shown
+        #   enabled: true
+        #   delayAfterAdd: 10m
+        #   unneededTime: 10m
+        #   utilizationThreshold: '0.5'
+        # podPriorityThreshold: -10
+        machineSets:
+          worker:
+            minReplicas: 3
+            maxReplicas: 6
+          # gpu:
+          #   minReplicas: 1
+          #   maxReplicas: 2
+      # =======================================================================
       # hermes-agent: the Hermes Agent harness, thinking with a model served through
       # Models-as-a-Service (DATA; the ENABLE flag is the hermes-agent label below).
       # Hermes derives its request model id, subscription, gateway and CA from
@@ -1999,6 +2033,11 @@ hubClusterSets:
       machine-health-checks-worker: 'true'   # Create MHC for the worker machine pool
       machine-health-checks-infra: 'false'   # Create MHC for the infra machine pool
       machine-health-checks-storage: 'false' # Create MHC for the storage machine pool
+
+      # =======================================================================
+      # Cluster Autoscaler. Reads config.clusterAutoscaler above.
+      # =======================================================================
+      cluster-autoscaler: 'false'
 
       # =======================================================================
       # Manual Remediations
