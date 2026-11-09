@@ -367,6 +367,13 @@ clusters:
       osc-source-namespace: openshift-marketplace
       osc-version: ''
 
+      # OpenShell gateway (policies/community/openshell). Requires agent-sandbox and
+      # cert-manager; openshell-maas also requires openshift-ai-maas, openshift-ai-models
+      # and config.openshell.maas.
+      openshell: 'false'
+      openshell-version: 'v0.1.6-rhaiv.4'
+      openshell-maas: 'false'
+
       # =======================================================================
       # Hermes Agent
       # =======================================================================

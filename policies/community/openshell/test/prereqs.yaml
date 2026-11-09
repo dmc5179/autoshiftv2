@@ -1,0 +1,49 @@
+# inform barrier: everything the gateway needs from the cluster, checked before anything is created.
+#
+# This replaces the chart's own Agent Sandbox preflight, which needs live API discovery and is turned
+# off for the offline render. Every check runs ON THE MANAGED CLUSTER and fails with a readable message
+# rather than rendering nothing, because an empty ConfigurationPolicy reports Compliant and would
+# release every dependent policy.
+#
+# What each check catches:
+#   - Sandbox API not served at v1beta1: the gateway starts but the first `sandbox create` fails. The
+#     agent-sandbox policy installs it; the Red Hat build serves v1beta1.
+#   - cert-manager CRDs absent: the chart's Issuer and Certificate objects cannot be created, and the
+#     gateway waits forever on Secrets that nothing issues.
+#   - No default StorageClass: the gateway's SQLite PVC stays Pending.
+object-templates-raw: |
+  {{- $sandboxCrd := (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "sandboxes.agents.x-k8s.io") }}
+  {{- if not $sandboxCrd }}
+  {{-   fail "CRD sandboxes.agents.x-k8s.io does not exist. Set autoshift.io/agent-sandbox to 'true' so the agent-sandbox policy installs the Red Hat build of Agent Sandbox, and check its operator installed." }}
+  {{- end }}
+  {{- $v1beta1 := false }}
+  {{- range $v := (index ($sandboxCrd.spec | default dict) "versions" | default list) }}
+  {{-   if and (eq (index $v "name" | default "") "v1beta1") (index $v "served" | default false) }}
+  {{-     $v1beta1 = true }}
+  {{-   end }}
+  {{- end }}
+  {{- if not $v1beta1 }}
+  {{-   fail "CRD sandboxes.agents.x-k8s.io does not serve v1beta1. OpenShell accepts agents.x-k8s.io/v1beta1 or v1alpha1, and the Red Hat build of Agent Sandbox serves v1beta1. Check whether the upstream kubernetes-sigs manifest was applied over it; the two collide." }}
+  {{- end }}
+  {{- if not (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "certificates.cert-manager.io") }}
+  {{-   fail "CRD certificates.cert-manager.io does not exist. Set autoshift.io/cert-manager to 'true'; the gateway's TLS comes from cert-manager." }}
+  {{- end }}
+  {{- $defaultSc := "" }}
+  {{- range $sc := (lookup "storage.k8s.io/v1" "StorageClass" "" "").items }}
+  {{-   if eq (index ($sc.metadata.annotations | default dict) "storageclass.kubernetes.io/is-default-class" | default "") "true" }}
+  {{-     $defaultSc = $sc.metadata.name }}
+  {{-   end }}
+  {{- end }}
+  {{- if not $defaultSc }}
+  {{-   fail "No default StorageClass. The gateway keeps its SQLite database on a PVC that requests the default class, so it would stay Pending." }}
+  {{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      metadata:
+        name: sandboxes.agents.x-k8s.io
+      status:
+        conditions:
+          - type: Established
+            status: 'True'

@@ -1,0 +1,11 @@
+# inform: the rhoai-maas provider has been reconciled at least once.
+#
+# The CronJob writes this ConfigMap only after the key is minted and the provider holds it, so its
+# existence is the signal; policy-openshell-maas-provider is Compliant as soon as the CronJob object
+# exists, before any run. The first run starts at the next schedule tick, so allow up to one interval
+# after the gateway is ready.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openshell-maas-provider-state
+  namespace: openshell

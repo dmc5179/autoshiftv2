@@ -1,0 +1,26 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-openshell-maas
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # The Models-as-a-Service provider policies: openshell AND openshell-maas. No spec.clusterSets: selects across all
+  # ManagedClusterSetBindings in this namespace,
+  # filtered by the predicate below.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/openshell'
+              operator: In
+              values:
+                - 'true'
+            - key: 'autoshift.io/openshell-maas'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

@@ -1,0 +1,21 @@
+# The CA that signs the cluster's own *.apps Routes and Gateways, which sandboxes must trust to reach
+# Models-as-a-Service and anything else served on the ingress domain.
+#
+# A sandbox's network supervisor terminates and re-originates every inspected HTTPS connection, and
+# it verifies the destination against its own trust store, not the workload image's. On a cluster
+# that still uses the operator-generated ingress certificate, that store does not contain the signer,
+# so every call to maas.<domain> would fail the TLS handshake after policy had already allowed it.
+#
+# The gateway reads this bundle at startup, stages it into each sandbox's supervisor, and adds it to
+# the workload's trust store as well ([openshell.supervisor.network] additional_ca_bundle). It is
+# trusted for every destination, which is acceptable for the cluster's own ingress signer.
+#
+# The ingress operator publishes the signer here on every OpenShift cluster. Copied whole, under its
+# own key ca-bundle.crt; the gateway mount maps that key to ca.crt. A changed signer reaches running
+# sandboxes only after the gateway pod restarts, because the gateway reads the file once.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openshell-additional-ca
+  namespace: openshell
+data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'

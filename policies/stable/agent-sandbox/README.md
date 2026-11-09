@@ -4,10 +4,11 @@ Installs the Red Hat build of Agent Sandbox Operator, which serves the `sandboxe
 API for running AI agents in isolated sandboxes. OpenShell, the agent runtime that ships as a
 Developer Preview with Red Hat OpenShift AI 3.5, requires it.
 
-This policy installs the Operator only. It creates no sandboxes, and OpenShell itself has no
-policy: it is a Helm chart plus manifests with no OperatorHub entry, and is not supported for
-production. The OLM operators it depends on are the part AutoShift and disconnected mirroring can
-manage. The others are the optional [rhbk](../rhbk/README.md) and [osc](../osc/README.md) policies.
+This policy installs the Operator only and creates no sandboxes. The OpenShell gateway itself is
+the [openshell](../../community/openshell/README.md) policy, in the community tier because it is an
+upstream Helm chart with no OperatorHub entry, a Developer Preview that is not supported for
+production. That policy requires this one on the same cluster. The other operators OpenShell can use
+are the optional [rhbk](../rhbk/README.md) and [osc](../osc/README.md) policies.
 SPIFFE workload identity for agents, where wanted, comes from the separate
 [ztwim](../ztwim/README.md) policy.
 

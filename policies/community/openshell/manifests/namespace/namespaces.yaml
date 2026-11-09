@@ -1,0 +1,21 @@
+# The gateway's release namespace, where sandboxes also run, and a separate namespace for the
+# provider credentials that the Kubernetes Secrets credential driver writes.
+#
+# The credential namespace is separate on purpose. The driver's Role grants read and write on EVERY
+# Secret in its namespace, so sharing the release namespace would hand the gateway the cert-manager
+# keys, the JWT signing key and anything else stored there. The chart can create this namespace
+# itself, but only through a Helm lookup, which an offline render cannot do, so it is created here.
+#
+# No SCC grant and no pod-security override: since OpenShell 0.1.0 the gateway, supervisor and
+# sandbox pods run under restricted-v2 with a UID from the namespace range.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshell
+  labels:
+    openshift.io/cluster-monitoring: 'true'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshell-credentials

@@ -22,6 +22,11 @@ hubClusterSets:
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         secretName: 'maas-api-key'
+      # OpenShell sandboxes reach this model through the rhoai-maas provider
+      # (openshell-maas label). The key is minted and renewed in the cluster.
+      openshell:
+        maas:
+          model: 'granite-4-tiny-gpu'
       openshiftAiModels:
         namespace: 'llm'
         maasNamespace: 'models-as-a-service'
@@ -46,8 +51,13 @@ hubClusterSets:
             # subjects; the subscription NAME is unaffected and stays
             # granite-4-tiny-gpu-default. kubeadmin is in neither group and cannot
             # mint against this model - by design.
+            #   system:serviceaccounts:openshell  the openshell-maas-provider
+            #       CronJob mints the key the OpenShell rhoai-maas provider holds.
+            #       Sandbox workloads get no ServiceAccount token, so this does not
+            #       let a sandbox mint keys of its own.
             accessGroups:
               - 'system:serviceaccounts:hermes'
+              - 'system:serviceaccounts:openshell'
               - 'maas-users'
             # servedModelName defaults to name. Overriding it so the two
             # disagree returns 404 "the model X does not exist" at inference
@@ -405,6 +415,21 @@ hubClusterSets:
       # Secret, created out of band, before it starts.
       hermes-agent: 'true'
       open-webui: 'true'
+      # OpenShell gateway (Developer Preview, not for production) and the Red Hat
+      # build of Agent Sandbox (Technology Preview) it needs. cert-manager, also
+      # required, is enabled further down. Agent Sandbox needs OCP 4.22.2 or later
+      # on 4.22 and RHCOS workers.
+      agent-sandbox: 'true'
+      agent-sandbox-subscription-name: agent-sandbox-operator
+      agent-sandbox-channel: preview-0.9
+      agent-sandbox-source: redhat-operators
+      agent-sandbox-source-namespace: openshift-marketplace
+      openshell: 'true'
+      openshell-version: 'v0.1.6-rhaiv.4'
+      # Second step of the rollout: turn on only after policy-openshell-gateway-ready is
+      # Compliant and one hand-made sandbox has run. Sandboxes then share the
+      # granite-4-tiny-gpu token budget with Hermes and everyone else.
+      openshell-maas: 'false'
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.

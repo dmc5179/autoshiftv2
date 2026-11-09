@@ -1,0 +1,108 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: openshell
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml, never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# Every policy shares placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-openshell
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # The gateway keeps its database (sandboxes, providers, workspaces) on a PVC, and provider
+  # credentials live as Secrets. Unplacing a policy, or turning a label off, must not delete them.
+  # With None, removal stops reconciliation and leaves every object in place, so removing OpenShell
+  # is a deliberate manual act.
+  pruneObjectBehavior: None
+  placement:
+    placementPath: placement.yaml
+policies:
+  # inform barrier. Everything below waits on it, so nothing is created on a cluster that cannot run
+  # sandboxes. It depends on the two operator installs as well as checking their APIs: an ACM
+  # dependency is evaluated against THIS cluster's copy of the named policy, so a cluster with
+  # openshell set but agent-sandbox or cert-manager unset leaves this Pending. The autoshift chart's
+  # validate-openshell check fails the render before that can happen.
+  - name: policy-openshell-prereqs
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-agent-sandbox-operator-install
+      - name: policy-cert-manager-operator-install
+    manifests:
+      - path: test/prereqs.yaml
+    customMessage:
+      noncompliant: '{{ regexReplaceAll "(?s).*error calling fail: " .DefaultMessage "" | trim }}'
+  - name: policy-openshell-namespace
+    dependencies:
+      - name: policy-openshell-prereqs
+    manifests:
+      - path: manifests/namespace
+  # The upstream chart, rendered offline. See manifests/gateway/kustomization.yaml for what offline
+  # rendering changes and how each change is handled.
+  - name: policy-openshell-gateway
+    dependencies:
+      - name: policy-openshell-namespace
+    manifests:
+      - path: manifests/gateway
+  # inform: the gateway is serving, not just created. Not depended on by the gateway policy: it
+  # detects, it does not gate, and the effect cannot exist until the gateway policy has run.
+  - name: policy-openshell-gateway-ready
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshell-gateway
+    manifests:
+      - path: test/gateway-ready.yaml
+    customMessage:
+      noncompliant: >-
+        The OpenShell gateway is not serving. Check, in order: Certificate openshell-server in
+        namespace openshell is Ready (cert-manager issues the TLS the pod mounts); the certgen Job
+        succeeded (it creates the sandbox JWT signing Secret openshell-jwt-keys); the openshell-0 pod
+        events, where a Pending pod usually means no default StorageClass.
+  # Opt-in (autoshift.io/openshell-maas): the rhoai-maas provider profile and provider, and the
+  # CronJob that keeps its Models-as-a-Service key renewed. Waits for the gateway to serve and for
+  # the model to be ready, because the CronJob mints against the model's subscription. The
+  # validate-openshell check requires openshift-ai-maas and openshift-ai-models with this label.
+  - name: policy-openshell-maas-provider
+    placement:
+      placementPath: placement-openshell-maas.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshell-gateway-ready
+      - name: policy-openshift-ai-models-ready
+    manifests:
+      - path: manifests/maas/maas-provider.yaml
+    customMessage:
+      noncompliant: '{{ regexReplaceAll "(?s).*error calling fail: " .DefaultMessage "" | trim }}'
+  # inform: the CronJob has completed at least one reconcile.
+  - name: policy-openshell-maas-provider-ready
+    placement:
+      placementPath: placement-openshell-maas.yaml
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshell-maas-provider
+    manifests:
+      - path: test/maas-provider-ready.yaml
+    customMessage:
+      noncompliant: >-
+        The rhoai-maas provider has not been reconciled yet. The first run starts at the next
+        CronJob tick (config.openshell.maas.schedule, default every 15 minutes). If a run has
+        failed, read it: oc -n openshell logs job/<latest openshell-maas-provider job>. The usual
+        cause is a mint rejected with HTTP 403, meaning the model's accessGroups in
+        config.openshiftAiModels do not include system:serviceaccounts:openshell.

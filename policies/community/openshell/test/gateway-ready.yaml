@@ -1,0 +1,40 @@
+# inform: the gateway came up, not just its objects.
+#
+# policy-openshell-gateway reports Compliant as soon as every object exists, which is before
+# cert-manager has issued anything and before the gateway pod can start: it mounts the server TLS
+# Secret and the JWT signing Secret, and waits in ContainerCreating until both exist. This asserts
+# the effects instead.
+#
+# Ready here is still not proof that sandboxes work. The supervisor and sandbox runtime images are
+# pulled only when the first sandbox is created, so a wrong tag or a missing mirror shows up there
+# and nowhere else. Create one sandbox before calling a cluster done.
+object-templates-raw: |
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: openshell-server
+        namespace: openshell
+      status:
+        conditions:
+          - type: Ready
+            status: 'True'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: 'openshell-certgen-{{hub index .ManagedClusterLabels "autoshift.io/openshell-version" | default "v0.1.6-rhaiv.4" hub}}'
+        namespace: openshell
+      status:
+        succeeded: 1
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: openshell
+        namespace: openshell
+      status:
+        readyReplicas: 1

@@ -1,0 +1,375 @@
+# Gives sandboxes governed access to a Models-as-a-Service model: an imported provider profile that
+# binds a MaaS API key to the MaaS gateway, and a provider instance holding that key.
+#
+# How a sandbox uses it. OpenShell 0.1.6 has no inference router: a sandbox started with
+# `--provider rhoai-maas` calls the MaaS gateway directly, with OPENAI_BASE_URL set and an opaque
+# placeholder in OPENAI_API_KEY. The sandbox proxy swaps the placeholder for the real key only on
+# requests to the host, port and path the profile names, from a binary the profile lists. The key
+# never enters the sandbox and cannot be sent anywhere else.
+#
+# Why a CronJob. Provider profiles and providers are gateway state, stored in the gateway database,
+# not Kubernetes objects, so a policy cannot declare them. The CronJob reconciles them with the
+# openshell CLI, and it also renews the key: a provider credential can be replaced while sandboxes
+# run, and attached sandboxes pick up the new value, so the key does not have to outlive anything.
+# Each run is cheap when there is nothing to do, and it mints a new key only when:
+#   - the provider is missing (first run, or the gateway database was lost),
+#   - the key is inside its renewal window, or
+#   - the profile, gateway URL, subscription or TTL changed.
+# Replaced keys are not revoked; each expires at the end of its own TTL.
+#
+# The key is minted the way hermes-agent mints its own: the Job's ServiceAccount token, against the
+# <model>-default subscription that openshift-ai-models creates. maas-api accepts it only when the
+# model's accessGroups include system:serviceaccounts:openshell.
+#
+# The CLI authenticates with the gateway's mTLS client bundle. With OIDC not configured, every
+# mTLS-authenticated caller is a platform admin, which importing a platform-scoped profile requires.
+# Once OIDC is enabled on the gateway, the bundle no longer signs anyone in and this Job needs an OIDC
+# client credential instead.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $mc := (dig "openshell" "maas" (dict) $cfg) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $model := (dig "model" "" $mc) hub}}
+  {{hub- if not $model hub}}{{hub fail "openshell: config.openshell.maas.model is required when openshell-maas is 'true', the name of a model in config.openshiftAiModels.models" hub}}{{hub- end hub}}
+  {{hub- $modelNs := (dig "namespace" "" $m) hub}}
+  {{hub- if not $modelNs hub}}{{hub fail "openshell: config.openshiftAiModels.namespace is required; sandboxes reach their model through openshift-ai-models" hub}}{{hub- end hub}}
+  {{hub- $found := false hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $model hub}}{{hub- $found = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $found hub}}{{hub fail (printf "openshell: config.openshell.maas.model %s is not a model in config.openshiftAiModels.models" $model) hub}}{{hub- end hub}}
+  {{hub- $ttl := (dig "keyTtl" "720h" $mc) hub}}
+  {{hub- $renew := (dig "renewBefore" "168h" $mc) hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $ttl) hub}}{{hub fail (printf "openshell: config.openshell.maas.keyTtl %s must be a whole number of hours, for example 720h" $ttl) hub}}{{hub- end hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $renew) hub}}{{hub fail (printf "openshell: config.openshell.maas.renewBefore %s must be a whole number of hours, for example 168h" $renew) hub}}{{hub- end hub}}
+  {{hub- if gt (atoi (trimSuffix "h" $ttl)) 2160 hub}}{{hub fail (printf "openshell: config.openshell.maas.keyTtl %s exceeds 2160h; Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys longer than 90 days" $ttl) hub}}{{hub- end hub}}
+  {{hub- if ge (atoi (trimSuffix "h" $renew)) (atoi (trimSuffix "h" $ttl)) hub}}{{hub fail (printf "openshell: config.openshell.maas.renewBefore %s must be shorter than keyTtl %s, or every run mints a new key" $renew $ttl) hub}}{{hub- end hub}}
+  {{hub- $schedule := (dig "schedule" "*/15 * * * *" $mc) hub}}
+  {{hub- $defaultBinaries := (list "/usr/bin/curl" "/usr/local/bin/curl" "/usr/bin/python3" "/usr/bin/python3.*" "/usr/local/bin/python3" "/usr/local/bin/python3.*" "/opt/app-root/bin/python3*" "/sandbox/.venv/**" "/sandbox/.uv/python/**" "/usr/bin/node" "/usr/local/bin/node") hub}}
+  {{hub- $binaries := (dig "binaries" $defaultBinaries $mc) hub}}
+  {{hub- $gwName := (dig "gateway" "name" "maas-default-gateway" $m) hub}}
+  {{hub- $gwNs := (dig "gateway" "namespace" "openshift-ingress" $m) hub}}
+  {{hub- $tag := (index .ManagedClusterLabels "autoshift.io/openshell-version" | default "v0.1.6-rhaiv.4") hub}}
+  {{- $gw := (lookup "gateway.networking.k8s.io/v1" "Gateway" "{{hub $gwNs hub}}" "{{hub $gwName hub}}") | default dict }}
+  {{- $host := "" }}
+  {{- range $l := (dig "spec" "listeners" (list) $gw) }}
+  {{- if and (not $host) (eq (dig "protocol" "" $l) "HTTPS") }}{{- $host = (dig "hostname" "" $l) }}{{- end }}
+  {{- end }}
+  {{- if not $host }}{{ fail "openshell: no HTTPS listener hostname on Gateway {{hub $gwNs hub}}/{{hub $gwName hub}}; check policy-openshift-ai-maas-ready" }}{{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: openshell-maas-provider
+        namespace: openshell
+  # The state ConfigMap records when the current key expires and which configuration it was minted
+  # for. get and patch are limited to it by name; create cannot be limited by name, so it is scoped
+  # to this namespace.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: openshell-maas-provider
+        namespace: openshell
+      rules:
+        - apiGroups:
+            - ''
+          resources:
+            - configmaps
+          resourceNames:
+            - openshell-maas-provider-state
+          verbs:
+            - get
+            - patch
+        - apiGroups:
+            - ''
+          resources:
+            - configmaps
+          verbs:
+            - create
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: openshell-maas-provider
+        namespace: openshell
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: openshell-maas-provider
+      subjects:
+        - kind: ServiceAccount
+          name: openshell-maas-provider
+          namespace: openshell
+  # The provider profile. The credential is bound to the MaaS host on 443 under /v1, the
+  # OpenAI-compatible API, so the placeholder resolves nowhere else. binaries is the least-privilege
+  # control over which processes in a sandbox may use the key: override config.openshell.maas.binaries
+  # to match the agent images actually in use.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: openshell-maas-profile
+        namespace: openshell
+      data:
+        profile.yaml: |
+          id: rhoai-maas
+          display_name: Red Hat OpenShift AI Models-as-a-Service
+          description: OpenAI-compatible inference through this cluster's Models-as-a-Service gateway
+          category: inference
+          inference_capable: true
+          credentials:
+            - name: api_key
+              description: Models-as-a-Service API key, minted and renewed by the AutoShift openshell policy
+              env_vars:
+                - OPENAI_API_KEY
+              required: true
+              auth_style: bearer
+              header_name: authorization
+          endpoints:
+            - host: {{ $host }}
+              port: 443
+              path: /v1/**
+              protocol: rest
+              access: read-write
+              enforcement: enforce
+          binaries:
+          {{hub- range $b := $binaries hub}}
+            - '{{hub $b hub}}'
+          {{hub- end hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: openshell-maas-provider-script
+        namespace: openshell
+      data:
+        reconcile.sh: |
+          # Reconciles the rhoai-maas provider profile and provider on the OpenShell gateway, and
+          # keeps the provider's Models-as-a-Service key renewed. Nothing below prints a key: it
+          # travels in the environment and on stdin only.
+          set -euo pipefail
+          SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+          NAMESPACE="$(cat "${SA_DIR}/namespace")"
+          KUBE_API="${KUBE_API:-https://kubernetes.default.svc}"
+          STATE_CM=openshell-maas-provider-state
+          PROFILE_FILE=/etc/openshell-maas/profile.yaml
+          log() { printf '[maas-provider] %s\n' "$*" >&2; }
+          hours_to_seconds() { printf '%s' "$(( ${1%h} * 3600 ))"; }
+
+          # kube METHOD PATH: call the Kubernetes API as this ServiceAccount. A request body is
+          # read from stdin. Prints the body, then the HTTP status on its own final line.
+          kube() {
+              local args=(--silent --show-error --max-time 20 --cacert "${SA_DIR}/ca.crt"
+                          -H "Authorization: Bearer $(cat "${SA_DIR}/token")"
+                          -X "$1" --write-out '\n%{http_code}')
+              case "$1" in
+                  POST)  args+=(-H 'Content-Type: application/json' --data-binary @-) ;;
+                  PATCH) args+=(-H 'Content-Type: application/merge-patch+json' --data-binary @-) ;;
+              esac
+              curl "${args[@]}" "${KUBE_API}$2" 2>/dev/null || printf '\n000'
+          }
+          json_field() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n1; }
+
+          # --- connect the CLI with the gateway's mTLS client bundle -------------------
+          MTLS_DIR="${HOME}/.config/openshell/gateways/openshell/mtls"
+          mkdir -p "${MTLS_DIR}"
+          cp /var/run/openshell-mtls/ca.crt /var/run/openshell-mtls/tls.crt /var/run/openshell-mtls/tls.key "${MTLS_DIR}/"
+          chmod 600 "${MTLS_DIR}/tls.key"
+          openshell gateway add "${GATEWAY_ENDPOINT}" --local --name openshell >/dev/null 2>&1 || true
+          export OPENSHELL_GATEWAY=openshell
+          connected=false
+          for attempt in 1 2 3 4 5 6; do
+              if openshell status >/dev/null 2>&1; then connected=true; break; fi
+              log "attempt ${attempt}/6: gateway ${GATEWAY_ENDPOINT} not reachable yet"
+              sleep $(( attempt * 5 ))
+          done
+          if [[ "${connected}" != true ]]; then
+              log "FATAL: cannot reach the gateway at ${GATEWAY_ENDPOINT}. Check policy-openshell-gateway-ready."
+              exit 1
+          fi
+
+          # --- what the current key was minted for -------------------------------------
+          want_hash="$( { cat "${PROFILE_FILE}"; printf '%s\n' "${MAAS_BASE_URL}" "${MAAS_SUBSCRIPTION}" "${MAAS_KEY_TTL}"; } | sha256sum | cut -c1-16)"
+          state="$(kube GET "/api/v1/namespaces/${NAMESPACE}/configmaps/${STATE_CM}" </dev/null)"
+          state_code="${state##*$'\n'}"
+          have_hash=""; expires_at=0
+          if [[ "${state_code}" == 200 ]]; then
+              have_hash="$(printf '%s' "${state%$'\n'*}" | json_field configHash)"
+              expires_at="$(printf '%s' "${state%$'\n'*}" | json_field expiresAt)"
+              expires_at="${expires_at:-0}"
+          elif [[ "${state_code}" != 404 ]]; then
+              log "FATAL: cannot read ConfigMap ${STATE_CM} (HTTP ${state_code}). Check the openshell-maas-provider Role."
+              exit 1
+          fi
+
+          # --- the profile ---------------------------------------------------------------
+          if openshell profile describe rhoai-maas --global >/dev/null 2>&1; then
+              if [[ "${have_hash}" != "${want_hash}" ]]; then
+                  openshell profile update rhoai-maas --global -f "${PROFILE_FILE}" >/dev/null
+                  log "updated provider profile rhoai-maas"
+              fi
+          else
+              openshell profile import --global -f "${PROFILE_FILE}" >/dev/null
+              log "imported provider profile rhoai-maas"
+          fi
+
+          # --- the provider and its key --------------------------------------------------
+          now="$(date -u +%s)"
+          renew_at=$(( expires_at - $(hours_to_seconds "${MAAS_RENEW_BEFORE}") ))
+          provider_exists=false
+          if openshell provider get rhoai-maas >/dev/null 2>&1; then provider_exists=true; fi
+          reason=""
+          if [[ "${provider_exists}" != true ]]; then reason="provider rhoai-maas does not exist"
+          elif [[ "${have_hash}" != "${want_hash}" ]]; then reason="configuration changed"
+          elif (( now >= renew_at )); then reason="key expires at $(date -u -d "@${expires_at}" +%FT%TZ)"
+          fi
+          if [[ -z "${reason}" ]]; then
+              log "nothing to do: key valid until $(date -u -d "@${expires_at}" +%FT%TZ), renewal from $(date -u -d "@${renew_at}" +%FT%TZ)"
+              exit 0
+          fi
+          log "minting a new key: ${reason}"
+
+          body="$(printf '{"name":"openshell-gateway","description":"Minted by the AutoShift openshell policy for the OpenShell rhoai-maas provider","expiresIn":"%s","subscription":"%s"}' "${MAAS_KEY_TTL}" "${MAAS_SUBSCRIPTION}")"
+          OPENAI_API_KEY=""
+          for attempt in 1 2 3 4 5; do
+              resp="$(printf '%s' "${body}" | curl --silent --show-error --max-time 30 --cacert /etc/openshell-maas-ca/ca-bundle.crt \
+                  --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
+                  -H "Authorization: Bearer $(cat "${SA_DIR}/token")" \
+                  -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
+              code="${resp##*$'\n'}"
+              if [[ "${code}" == 200 || "${code}" == 201 ]]; then
+                  OPENAI_API_KEY="$(printf '%s' "${resp%$'\n'*}" | json_field key)"
+                  [[ -n "${OPENAI_API_KEY}" ]] && break
+                  log "attempt ${attempt}/5: HTTP ${code} but no key in the response"
+              else
+                  log "attempt ${attempt}/5: mint rejected or unreachable, HTTP ${code}"
+              fi
+              sleep $(( attempt * 5 ))
+          done
+          unset resp
+          if [[ -z "${OPENAI_API_KEY}" ]]; then
+              log "FATAL: no MaaS key. Check that subscription ${MAAS_SUBSCRIPTION} exists and that the model's accessGroups include system:serviceaccounts:${NAMESPACE}."
+              exit 1
+          fi
+          export OPENAI_API_KEY
+          expires_at=$(( now + $(hours_to_seconds "${MAAS_KEY_TTL}") ))
+          if [[ "${provider_exists}" == true ]]; then
+              openshell provider update rhoai-maas --credential OPENAI_API_KEY \
+                  --config "OPENAI_BASE_URL=${MAAS_BASE_URL}" >/dev/null
+          else
+              openshell provider create --name rhoai-maas --type rhoai-maas \
+                  --credential OPENAI_API_KEY --config "OPENAI_BASE_URL=${MAAS_BASE_URL}" >/dev/null
+          fi
+          openshell provider update rhoai-maas --credential-expires-at "OPENAI_API_KEY=$(( expires_at * 1000 ))" >/dev/null
+          unset OPENAI_API_KEY
+          log "provider rhoai-maas has a new key, valid until $(date -u -d "@${expires_at}" +%FT%TZ)"
+
+          # --- record it -----------------------------------------------------------------
+          data="$(printf '"data":{"expiresAt":"%s","configHash":"%s","mintedAt":"%s"}' "${expires_at}" "${want_hash}" "${now}")"
+          if [[ "${state_code}" == 200 ]]; then
+              out="$(printf '{%s}' "${data}" | kube PATCH "/api/v1/namespaces/${NAMESPACE}/configmaps/${STATE_CM}")"
+          else
+              out="$(printf '{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s"},%s}' "${STATE_CM}" "${data}" \
+                  | kube POST "/api/v1/namespaces/${NAMESPACE}/configmaps")"
+          fi
+          if [[ "${out##*$'\n'}" != 200 && "${out##*$'\n'}" != 201 ]]; then
+              log "FATAL: the key is in place but ConfigMap ${STATE_CM} was not written (HTTP ${out##*$'\n'}); the next run mints again."
+              exit 1
+          fi
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: openshell-maas-provider
+        namespace: openshell
+      spec:
+        schedule: '{{hub $schedule hub}}'
+        concurrencyPolicy: Forbid
+        successfulJobsHistoryLimit: 1
+        failedJobsHistoryLimit: 3
+        jobTemplate:
+          spec:
+            backoffLimit: 1
+            activeDeadlineSeconds: 600
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: openshell-maas-provider
+              spec:
+                serviceAccountName: openshell-maas-provider
+                restartPolicy: Never
+                securityContext:
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: reconcile
+                    image: 'quay.io/opendatahub/odh-openshell-cli:{{hub $tag hub}}'
+                    command:
+                      - /bin/bash
+                      - /etc/openshell-maas-script/reconcile.sh
+                    env:
+                      - name: HOME
+                        value: /tmp
+                      - name: GATEWAY_ENDPOINT
+                        value: https://openshell.openshell.svc:8080
+                      - name: MAAS_API_BASE
+                        value: 'https://{{ $host }}'
+                      - name: MAAS_BASE_URL
+                        value: 'https://{{ $host }}/v1'
+                      - name: MAAS_SUBSCRIPTION
+                        value: '{{hub $model hub}}-default'
+                      - name: MAAS_KEY_TTL
+                        value: '{{hub $ttl hub}}'
+                      - name: MAAS_RENEW_BEFORE
+                        value: '{{hub $renew hub}}'
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop:
+                          - ALL
+                    resources:
+                      requests:
+                        cpu: 10m
+                        memory: 32Mi
+                      limits:
+                        memory: 128Mi
+                    volumeMounts:
+                      - name: tmp
+                        mountPath: /tmp
+                      - name: script
+                        mountPath: /etc/openshell-maas-script
+                        readOnly: true
+                      - name: profile
+                        mountPath: /etc/openshell-maas
+                        readOnly: true
+                      - name: mtls
+                        mountPath: /var/run/openshell-mtls
+                        readOnly: true
+                      - name: maas-ca
+                        mountPath: /etc/openshell-maas-ca
+                        readOnly: true
+                volumes:
+                  - name: tmp
+                    emptyDir: {}
+                  - name: script
+                    configMap:
+                      name: openshell-maas-provider-script
+                  - name: profile
+                    configMap:
+                      name: openshell-maas-profile
+                  - name: mtls
+                    secret:
+                      secretName: openshell-client-tls
+                      defaultMode: 256
+                  - name: maas-ca
+                    configMap:
+                      name: openshell-additional-ca

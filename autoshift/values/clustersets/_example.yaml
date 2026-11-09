@@ -211,6 +211,26 @@ hubClusterSets:
         contextLength: '131072'
 
       # =======================================================================
+      # openshell: the Models-as-a-Service provider for OpenShell sandboxes (DATA; the ENABLE
+      # flags are the openshell and openshell-maas labels below). The key is minted in the
+      # cluster with a ServiceAccount token, so nothing here is a credential.
+      # =======================================================================
+      openshell:
+        maas:
+          # Required. The name of a model in openshiftAiModels.models. Its accessGroups must
+          # include system:serviceaccounts:openshell, which mints the key. Example value.
+          model: 'granite-4-tiny-gpu'
+          keyTtl: '720h'                         # default 720h; whole hours, at most 2160h (90 days)
+          renewBefore: '168h'                    # default 168h; must be shorter than keyTtl
+          schedule: '*/15 * * * *'               # default; a run with nothing to do mints nothing
+          # Executables in a sandbox that may use the key. Default: curl, Python and Node at the
+          # usual paths. List the paths in the agent images actually in use.
+          binaries:
+            - '/usr/bin/curl'
+            - '/usr/bin/python3.*'
+            - '/sandbox/.venv/**'
+
+      # =======================================================================
       # open-webui: Open WebUI as the chat front end for hermes-agent (DATA; the ENABLE flag
       # is the open-webui label below). It connects to Hermes in-cluster and copies the API
       # key Hermes generates, so it needs no credentials of its own from git.
@@ -2539,10 +2559,10 @@ hubClusterSets:
       # =======================================================================
       # Agent sandboxing (OpenShell prerequisites)
       # =======================================================================
-      # OpenShell itself is not an operator — it is a Helm chart plus raw manifests from
-      # upstream NVIDIA, Developer Preview in RHOAI 3.5 and explicitly not supported for
-      # production. These are the OLM operators it depends on, which is the part OLM
-      # air-gapped mirroring and AutoShift can actually manage. SPIFFE workload identity
+      # OpenShell itself is not an operator — it is a Helm chart from upstream NVIDIA,
+      # Developer Preview in RHOAI 3.5 and explicitly not supported for production. The
+      # openshell labels below deploy it (policies/community/openshell); the rest are the
+      # OLM operators it depends on or can use. SPIFFE workload identity
       # for agents, where wanted, comes from the ztwim policy: see the Zero Trust Workload
       # Identity Manager (SPIRE) labels.
 
@@ -2577,6 +2597,18 @@ hubClusterSets:
       osc-source: redhat-operators
       osc-source-namespace: openshift-marketplace
       osc-version: ''
+
+      # OpenShell gateway (policies/community/openshell). Developer Preview in Red Hat OpenShift
+      # AI 3.5, not supported for production. Upstream NVIDIA Helm chart on the Red Hat
+      # product-built images (quay.io/opendatahub/odh-openshell-*). Requires agent-sandbox and
+      # cert-manager on the same cluster; the autoshift chart fails the render otherwise.
+      openshell: 'false'
+      # Image tag for the gateway, supervisor and sandbox runtime. Must come from the same upstream
+      # release as the chart the policy pins (0.1.6): v0.1.6-rhaiv.N.
+      openshell-version: 'v0.1.6-rhaiv.4'
+      # Sandboxes reach a Models-as-a-Service model through the rhoai-maas provider. Needs
+      # config.openshell.maas, plus openshift-ai-maas and openshift-ai-models on the same cluster.
+      openshell-maas: 'false'
 
       # =======================================================================
       # Nvidia Gpu Operator
