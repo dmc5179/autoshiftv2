@@ -98,7 +98,9 @@ renewal working.
 If maas-api refuses or cannot be reached when renewal is due, Hermes keeps running on the old key
 while it is valid and retries in an hour, rather than going down early.
 `policy-hermes-agent-key` reports a key that has expired, or whose renewal is more than two hours
-overdue. Replaced keys are not revoked; each expires at the end of its own TTL.
+overdue. Once the replacement is stored, the bootstrap revokes the key it replaced, using the key
+id it records in the Secret's `hermes.autoshift.io/key-id` annotation. A failed revocation is
+logged, and that key then lapses at the end of its own TTL.
 
 `keyTtl` is capped at `2160h` because Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys
 longer than 90 days. The same keys and limits are used by the `openshell` policy.
@@ -131,8 +133,9 @@ After about seven minutes, expect:
 - The `[bootstrap]` log shows `minting a MaaS key: key expires at` the moved date, then
   `minted MaaS key` with a new expiry `keyTtl` ahead.
 - New `expires-at` and `minted-at` annotations on the Secret, and an unchanged `config-hash`.
-- Two `hermes-agent` keys listed by maas-api for the ServiceAccount, because the replaced key
-  is not revoked.
+- `revoked the replaced MaaS key <id>` in the same log, a new `key-id` annotation, and the old
+  key listed by maas-api as `revoked`. A key stored before key-id was recorded has no id and is
+  left to lapse instead.
 - `policy-hermes-agent-key` stays Compliant: the moved expiry is still in the future. While the
   container is down, `policy-hermes-agent-ready` can report NonCompliant and the key policy,
   which depends on it, Pending. Both recover once the pod is Available again.

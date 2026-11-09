@@ -189,8 +189,9 @@ object-templates-raw: |
           # renewal window (MAAS_KEY_RENEW_BEFORE ahead of expiry). The container exits
           # with status 124, the kubelet restarts it in the same pod, and this script mints
           # the replacement. That restart, roughly every keyTtl minus renewBefore, is the
-          # renewal working, not a fault. Replaced keys are not revoked; each expires at
-          # the end of its own TTL.
+          # renewal working, not a fault. Once the replacement is stored, the key it
+          # replaced is revoked, so at most one key is valid at a time. A failed
+          # revocation is logged and the old key then lapses at the end of its own TTL.
           #
           # Every secret travels on stdin. Nothing below prints a key.
           set -euo pipefail
@@ -269,7 +270,7 @@ object-templates-raw: |
           key_path="/api/v1/namespaces/${NAMESPACE}/secrets/${MAAS_KEY_SECRET}"
           resp="$(kube GET "$key_path" </dev/null)"
           code="${resp##*$'\n'}"
-          have_key=""; have_hash=""; expires_at=0; key_exists=false
+          have_key=""; have_hash=""; have_id=""; expires_at=0; key_exists=false
           if [[ "$code" == 200 ]]; then
               key_exists=true
               fields="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
@@ -279,10 +280,12 @@ object-templates-raw: |
           k = (d.get("data") or {}).get("MAAS_API_KEY", "")
           print(base64.b64decode(k).decode() if k else "")
           print(a.get("hermes.autoshift.io/config-hash", ""))
-          print(a.get("hermes.autoshift.io/expires-at", "0"))')"
+          print(a.get("hermes.autoshift.io/expires-at", "0"))
+          print(a.get("hermes.autoshift.io/key-id", ""))')"
               have_key="$(sed -n 1p <<<"$fields")"
               have_hash="$(sed -n 2p <<<"$fields")"
               expires_at="$(sed -n 3p <<<"$fields")"
+              have_id="$(sed -n 4p <<<"$fields")"
               [[ "$expires_at" =~ ^[0-9]+$ ]] || expires_at=0
               unset fields
           elif [[ "$code" != 404 ]]; then
@@ -311,7 +314,7 @@ object-templates-raw: |
                             "description": "Minted by the AutoShift hermes-agent policy",
                             "expiresIn": os.environ["MAAS_KEY_TTL"],
                             "subscription": os.environ["MAAS_SUBSCRIPTION"]}))')"
-              maas_key=""
+              maas_key=""; maas_id=""
               for attempt in $(seq 1 "$ATTEMPTS"); do
                   resp="$(printf '%s' "$body" | curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
                       --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
@@ -319,9 +322,14 @@ object-templates-raw: |
                       -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
                   code="${resp##*$'\n'}"
                   if [[ "$code" == 200 || "$code" == 201 ]]; then
-                      maas_key="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+                      minted="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
           import json, sys
-          print(json.load(sys.stdin).get("key", ""))')"
+          d = json.load(sys.stdin)
+          print(d.get("key", ""))
+          print(d.get("id", ""))')"
+                      maas_key="$(sed -n 1p <<<"$minted")"
+                      maas_id="$(sed -n 2p <<<"$minted")"
+                      unset minted
                       [[ -n "$maas_key" ]] && break
                       log "attempt ${attempt}/${ATTEMPTS}: HTTP ${code} but no key in the response"
                   elif [[ "$code" == 000 ]]; then
@@ -350,9 +358,10 @@ object-templates-raw: |
                                       "app.kubernetes.io/managed-by": "hermes-bootstrap"},
                            "annotations": {"hermes.autoshift.io/expires-at": sys.argv[2],
                                            "hermes.autoshift.io/config-hash": sys.argv[3],
-                                           "hermes.autoshift.io/minted-at": sys.argv[4]}},
+                                           "hermes.autoshift.io/minted-at": sys.argv[4],
+                                           "hermes.autoshift.io/key-id": sys.argv[5]}},
               "data": {"MAAS_API_KEY": base64.b64encode(key.encode()).decode()}}))' \
-                      "$MAAS_KEY_SECRET" "$expires_at" "$want_hash" "$now" | kube "$method" "$path")"
+                      "$MAAS_KEY_SECRET" "$expires_at" "$want_hash" "$now" "$maas_id" | kube "$method" "$path")"
                   code="${stored##*$'\n'}"
                   unset stored
                   if [[ "$code" != 200 && "$code" != 201 ]]; then
@@ -360,6 +369,24 @@ object-templates-raw: |
                       exit 1
                   fi
                   log "minted MaaS key (subscription ${MAAS_SUBSCRIPTION}, ttl ${MAAS_KEY_TTL}), valid until $(utc "$expires_at")"
+                  # Revoke the key this one replaced. Only after the new key is stored, so a
+                  # failure anywhere above leaves the old key working. Nothing else holds it:
+                  # the Deployment is Recreate and a renewal restarts this same container, so
+                  # the process that used it has already exited. A key belongs to its minter,
+                  # so this ServiceAccount may revoke it. Keys stored before key-id was
+                  # recorded have no id and lapse at the end of their TTL. After a gateway
+                  # change the old id is unknown to the new gateway, and the 404 is harmless.
+                  if [[ -n "$have_id" && "$have_id" != "$maas_id" ]]; then
+                      code="$(curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
+                          --output /dev/null --write-out '%{http_code}' -X DELETE \
+                          "${MAAS_API_BASE}/maas-api/v1/api-keys/${have_id}" \
+                          -H "Authorization: Bearer $(cat "${SA_DIR}/token")" 2>/dev/null || printf '000')"
+                      case "$code" in
+                          200|202|204) log "revoked the replaced MaaS key ${have_id}" ;;
+                          404) log "replaced MaaS key ${have_id} was already gone" ;;
+                          *) log "WARNING: could not revoke the replaced MaaS key ${have_id} (HTTP ${code}); it lapses at the end of its TTL" ;;
+                      esac
+                  fi
               elif [[ -n "$have_key" && "$have_hash" == "$want_hash" ]] && (( now < expires_at - 600 )); then
                   # Renewal failed but the old key still works: keep serving on it and try
                   # again in an hour rather than take Hermes down early.
@@ -412,7 +439,7 @@ object-templates-raw: |
             labels:
               app.kubernetes.io/name: hermes-agent
             annotations:
-              autoshift.io/hermes-bootstrap-revision: '2'
+              autoshift.io/hermes-bootstrap-revision: '3'
           spec:
             serviceAccountName: hermes-agent
             securityContext:
