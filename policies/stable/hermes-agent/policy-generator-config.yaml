@@ -55,6 +55,12 @@ policies:
             model's MaaSSubscription exists.
   # inform: is the MaaS key valid and renewing itself? Clock-based, so it cannot use watch:
   # nothing changes on the cluster when a key ages. A fixed interval re-evaluates it.
+  #
+  # Depends on -ready, not on the workload policy. policy-hermes-agent goes Compliant as soon as
+  # the Deployment matches its template, before the pod has minted anything, so a check gated on
+  # it reported a missing key on every fresh deployment until its next 10-minute evaluation. The
+  # bootstrap stores the key before Hermes starts, so once -ready reports the pod Available the
+  # Secret exists.
   - name: policy-hermes-agent-key
     remediationAction: inform
     consolidateManifests: false
@@ -62,16 +68,17 @@ policies:
       compliant: 1h
       noncompliant: 10m
     dependencies:
-      - name: policy-hermes-agent
+      - name: policy-hermes-agent-ready
     manifests:
       - path: test/hermes-agent-key.yaml
         customMessage:
           noncompliant: >
-            ❌ Hermes' Models-as-a-Service key has expired, or its renewal is
-            overdue. The pod renews the key by restarting at the start of the
-            renewal window and minting a new one. The reason it did not is in
-            its log: oc logs deploy/hermes-agent -n hermes. A 403 means
-            accessGroups; no HTTP response means maas-api or the gateway is down.
+            ❌ Hermes' Models-as-a-Service key has not been minted, has expired,
+            or is overdue for renewal. The pod mints the key at startup and
+            renews it by restarting at the start of the renewal window. The
+            reason it did not is in its log: oc logs deploy/hermes-agent -n
+            hermes. A 403 means accessGroups; no HTTP response means maas-api or
+            the gateway is down.
   # inform: did Hermes come up, and did its bootstrap create the API key Open WebUI depends on.
   - name: policy-hermes-agent-ready
     remediationAction: inform

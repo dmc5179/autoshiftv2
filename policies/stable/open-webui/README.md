@@ -63,6 +63,11 @@ How it works:
 The proxy has no way to pass OpenShift groups or roles to Open WebUI, so an OpenShift group cannot
 make someone an administrator. Further administrators are promoted in **Admin Panel > Users**.
 
+Right after the OpenShift OAuth server rolls out, for example after any change to an identity
+provider's Secret, sign-in can briefly fail at `/oauth/authorize` with `server_error` and
+`resource name may not be empty`. That comes from the OAuth server, not from this policy, and
+clears within a couple of minutes.
+
 ### `auth: local`
 
 Open WebUI's own accounts, with sign-up and passwords.

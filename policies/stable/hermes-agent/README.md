@@ -59,7 +59,7 @@ The rest is derived, so it cannot disagree with `openshift-ai-models`:
 | `policy-hermes-agent` | enforce | Namespace, ServiceAccount, the `hermes-api-key` Role, PVC, gateway CA, bootstrap script, Deployment and Service |
 | `policy-hermes-agent-access` | inform | The model grants the ServiceAccounts in this namespace, and its subscription exists |
 | `policy-hermes-agent-ready` | inform | The Deployment is Available and its `hermes-api-key` Secret exists |
-| `policy-hermes-agent-key` | inform | The MaaS key has not expired, and its renewal is not more than two hours overdue. Evaluated hourly rather than on change, because a key ages without any event |
+| `policy-hermes-agent-key` | inform | The MaaS key exists, has not expired, and is not more than two hours overdue for renewal. Runs once the pod is Available, and is evaluated hourly rather than on change, because a key ages without any event |
 
 ## Credentials
 

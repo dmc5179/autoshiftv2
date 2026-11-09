@@ -3,6 +3,7 @@
 # inform-only. The key is minted by the pod and kept in the hermes-maas-key Secret, whose
 # annotations record when it expires. The container restarts at the start of the renewal window
 # to mint the replacement; this check reports when that self-healing has not happened:
+#   - no Secret: the pod has never minted a key, reported by the object below;
 #   - expired: Hermes cannot reach its model, and every request returns a 401;
 #   - renewal more than two hours overdue: the restart did not renew it. The pod's [bootstrap]
 #     log says why, usually that maas-api refused or was unreachable.
