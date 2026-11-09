@@ -79,7 +79,12 @@ hubClusterSets:
             requestsMemory: '8Gi'
             limitsCpu: '4'
             limitsMemory: '24Gi'
-            tokenRateLimit: 50000
+            # Tokens per minute for the whole subscription, shared by everyone in
+            # accessGroups. Raised from 50000 on 2026-11-09: one Hermes agent turn
+            # costs about 14k prompt tokens (28k with a tool call), so 50k allowed
+            # about 3 turns a minute for everyone. 300k is about 20 turns a minute,
+            # still within what one L4 serving granite-4-tiny can process.
+            tokenRateLimit: 300000
             tokenRateWindow: '1m'
             # Tool calling. Off unless a parser is named, and the parser is
             # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
