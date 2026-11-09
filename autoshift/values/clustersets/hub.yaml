@@ -15,6 +15,10 @@ hubClusterSets:
         # Limitador make outbound calls (the RDS connection among them).
         namespaces:
           - 'llm'
+      hermesAgent:
+        model: 'granite-4-tiny-gpu'
+      openWebui:
+        adminEmail: 'danclark@redhat.com'
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         secretName: 'maas-api-key'
@@ -395,6 +399,12 @@ hubClusterSets:
       ztwim-channel: stable-v1
       ztwim-source: redhat-operators
       ztwim-source-namespace: openshift-marketplace
+      # Hermes agent and Open WebUI, native policies. Hermes mints its MaaS key
+      # with its own ServiceAccount (system:serviceaccounts:hermes is in the
+      # model's accessGroups). Open WebUI waits for the open-webui-admin
+      # Secret, created out of band, before it starts.
+      hermes-agent: 'true'
+      open-webui: 'true'
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.
