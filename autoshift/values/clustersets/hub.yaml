@@ -18,7 +18,7 @@ hubClusterSets:
       hermesAgent:
         model: 'granite-4-tiny-gpu'
       openWebui:
-        adminEmail: 'danclark@redhat.com'
+        adminEmail: 'danclark@cluster.local'
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         secretName: 'maas-api-key'
@@ -263,9 +263,15 @@ hubClusterSets:
           - name: maas-users
             users:
               - maas-user
+              - danclark
             namespaceRoles:
               - namespace: llm
                 role: view
+          - name: cluster-admins
+            users:
+              - danclark
+            clusterRoles:
+              - cluster-admin
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
