@@ -42,12 +42,12 @@ helmCharts:
       sandboxRuntime:
         image:
           repository: odh-openshell-sandbox
-      # restricted-v2 assigns the UID and fsGroup from the namespace range. Upstream ships this
-      # overlay as ci/values-openshift-scc.yaml.
-      podSecurityContext:
-        fsGroup: null
-      securityContext:
-        runAsUser: null
+      # restricted-v2 must assign the UID and fsGroup from the namespace range, so the chart's fixed
+      # runAsUser: 1000 and fsGroup: 1000 have to go. Upstream does that with null values
+      # (ci/values-openshift-scc.yaml), which works with `helm -f` but NOT here: kustomize drops
+      # null keys when it writes valuesInline out for helm, so helm keeps the chart defaults and the
+      # pod is rejected at admission. The two fields are removed by the patch on StatefulSet/openshell
+      # below instead. Do not reintroduce the nulls; they do nothing.
       # (1) Offline render cannot discover APIs.
       agentSandbox:
         preflight:
@@ -117,6 +117,18 @@ helmCharts:
             enabled: true
             namespace: openshell-credentials
 patches:
+  # restricted-v2 assigns the UID and fsGroup (see the note in valuesInline). Without this the pod is
+  # forbidden: "fsGroup: Invalid value: [1000]" and "runAsUser: Invalid value: 1000: must be in the
+  # ranges". The certgen Job sets neither field and needs nothing. The ops fail the render if the
+  # chart stops setting either field, which is the signal to drop them.
+  - target:
+      kind: StatefulSet
+      name: openshell
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/securityContext/fsGroup
+      - op: remove
+        path: /spec/template/spec/containers/0/securityContext/runAsUser
   # (4) Namespace-less in the chart output.
   - target:
       kind: ServiceAccount|ConfigMap|Service|StatefulSet
