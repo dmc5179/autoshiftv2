@@ -140,8 +140,17 @@ sandbox proxy substitutes the real credential only on requests that a provider p
   CronJob mints the key with its ServiceAccount token against the `<model>-default` subscription, the
   same way the hermes-agent policy mints its key. It mints a new key when the provider is missing,
   when the key is inside its renewal window, or when the profile, gateway URL, subscription or
-  lifetime changed. Running sandboxes pick up a renewed key. Replaced keys are not revoked; each
-  expires at the end of its own lifetime.
+  lifetime changed. Running sandboxes pick up a renewed key.
+
+  Once the new key is stored in the provider and recorded, the CronJob revokes the key it replaced,
+  so at most one key is valid at a time. A key belongs to the ServiceAccount that minted it, so no
+  extra permission is needed. A failed revocation is a warning, not a failure, and that key lapses at
+  the end of its own lifetime.
+
+  ConfigMap `openshell/openshell-maas-provider-state` records `expiresAt` and `mintedAt` (epoch
+  seconds), `configHash`, and `keyId`, the id of the current key. State written before `keyId` was
+  recorded has none, so the first renewal after an upgrade cannot revoke the key it replaces; every
+  renewal after that does.
 - **The `rhoai-maas` sandbox template**, which sets `OPENAI_BASE_URL` to the gateway's `/v1` URL. A
   provider's configuration values do not reach the sandbox environment in OpenShell 0.1.6: only
   credentials do, and only the built-in Google profiles project configuration. A template can carry
@@ -169,6 +178,25 @@ openshell sandbox create --name agent --template rhoai-maas --provider rhoai-maa
 openshell sandbox exec --name agent -- \
   sh -c 'curl -sS "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY"'
 ```
+
+### Testing a renewal
+
+To see a renewal and its revocation without waiting weeks, move the recorded expiry into the
+renewal window and run the CronJob once:
+
+```shell
+oc -n openshell patch configmap openshell-maas-provider-state --type merge \
+  -p "{\"data\":{\"expiresAt\":\"$(( $(date +%s) + 3600 ))\"}}"
+oc -n openshell create job openshell-maas-provider-renew-test --from=cronjob/openshell-maas-provider
+oc -n openshell logs -f job/openshell-maas-provider-renew-test
+oc -n openshell delete job openshell-maas-provider-renew-test
+```
+
+The log shows `minting a new key: key expires at ...`, then `provider rhoai-maas has a new key`,
+then `revoked the replaced MaaS key <id>`. The run records the new expiry, so the next scheduled
+run does nothing. Only the expiry is changed, and the real key is untouched until the run replaces
+it. The first test after upgrading from a version that did not record `keyId` mints but cannot
+revoke; run it twice to see the revocation.
 
 ### Trusting the cluster ingress certificate
 
