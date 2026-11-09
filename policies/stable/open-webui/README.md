@@ -130,6 +130,7 @@ the old one, which users see as an empty model list and `Model not found`.
 | `DEFAULT_MODELS=hermes-agent` | Preselects Hermes |
 | `ENABLE_VERSION_UPDATE_CHECK=false` | No polling GitHub for new releases |
 | `ENABLE_COMMUNITY_SHARING=false` | Removes the button that publishes a chat to openwebui.com |
+| `BYPASS_MODEL_ACCESS_CONTROL=true` | Every user who can sign in sees every model. Open WebUI otherwise shows a connection's models to administrators only, until an administrator grants access model by model, so a new user would see an empty model list. Who can sign in is already decided by `allowedGroups` or by the administrator |
 
 Most Open WebUI settings take effect on first start only. After that, change them in the Admin
 Panel.

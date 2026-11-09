@@ -301,6 +301,12 @@ object-templates-raw: |
                     value: 'false'
                   - name: ENABLE_COMMUNITY_SHARING
                     value: 'false'
+                  # Every user who can sign in sees every model. Without this Open WebUI shows a
+                  # connection's models to administrators only, until one grants access model by
+                  # model, and a new user finds an empty model list. Who can sign in is already
+                  # decided by allowedGroups, or by the administrator with auth local.
+                  - name: BYPASS_MODEL_ACCESS_CONTROL
+                    value: 'true'
                   # The models are seeded from the image; do not ask HuggingFace for updates.
                   - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
                     value: 'false'
