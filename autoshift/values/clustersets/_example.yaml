@@ -201,9 +201,11 @@ hubClusterSets:
         namespace: 'hermes'                      # default hermes
         # Default: the pinned image the policy was verified with.
         image: 'quay.io/aicatalyst/hermes-hermes-agent@sha256:1eb780739aeeb92e7c8f416ae57a0307405081f7fa0610fcffeac6914ea1ad60'
-        # MaaS key lifetime. Must exceed the longest expected pod lifetime: the key is fixed
-        # for the life of the pod, and a restart mints a new one.
+        # MaaS key lifetime, at most 2160h (90 days, the Red Hat OpenShift AI 3.5 limit). The
+        # key renews itself: the container restarts renewBefore ahead of expiry and mints a
+        # replacement, so a restart roughly every keyTtl minus renewBefore is expected.
         keyTtl: '720h'
+        renewBefore: '168h'                      # must be shorter than keyTtl
         storageSize: '10Gi'                      # Hermes memory, skills and history
         storageClass: 'gp3-csi'                  # example; omit for the cluster default
         # Optional. Only when Hermes cannot read the model's context window from the gateway.
@@ -243,12 +245,20 @@ hubClusterSets:
         storageClass: 'gp3-csi'                  # example; omit for the cluster default
         # Optional public hostname. Default: <namespace>.<cluster ingress domain>.
         routeHost: 'chat.apps.example.com'
+        # Sign-in: 'local' (default; Open WebUI accounts) or 'openshift' (OpenShift credentials
+        # through an oauth-proxy sidecar; only members of allowedGroups get in).
+        auth: 'openshift'
+        allowedGroups:                           # openshift only; default [maas-users]
+          - 'maas-users'
+        # proxyImage: ''                         # default: ImageStream openshift/oauth-proxy
         # Optional, strongly recommended. Open WebUI makes the first account to sign up the
-        # administrator. With adminEmail set, it creates that account at first start from a
-        # password in a Secret an administrator creates in the namespace, out of band, before
-        # the site is reachable. Credentials never come from git.
-        adminEmail: 'admin@example.com'
-        adminSecretRef:
+        # administrator; adminEmail names it instead, created at first start.
+        #   openshift: the proxy's address for an OpenShift user, <username>@cluster.local for
+        #              a user without an email address. No password Secret is needed.
+        #   local:     any address, with the password in a Secret an administrator creates in
+        #              the namespace (adminSecretRef) before the site is reachable.
+        adminEmail: 'admin@cluster.local'
+        adminSecretRef:                          # local only
           name: 'open-webui-admin'               # default open-webui-admin
           key: 'password'                        # default password
 

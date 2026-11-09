@@ -13,8 +13,10 @@
 #     managed cluster, so a certificate rotation is followed and nothing is committed to git.
 #
 # Credentials: none come from this policy. The pod mints its MaaS key with its own ServiceAccount
-# token, and creates the hermes-api-key Secret for Open WebUI on first start. See the bootstrap
-# script below for why both live in the pod rather than here.
+# token and keeps it, with its expiry, in the hermes-maas-key Secret; it creates the
+# hermes-api-key Secret for Open WebUI on first start. The key renews itself: the container
+# restarts when the key enters its renewal window (keyTtl minus renewBefore after minting) and
+# mints the replacement. See the bootstrap script below for why both live in the pod.
 #
 # Data safety: pruneObjectBehavior None (policy-generator-config.yaml). The Deployment is
 # mustonlyhave because musthave merges into containers[] and would silently never apply an image
@@ -36,6 +38,11 @@ object-templates-raw: |
   {{hub- $ns := (dig "namespace" "hermes" $h) hub}}
   {{hub- $image := (dig "image" "quay.io/aicatalyst/hermes-hermes-agent@sha256:1eb780739aeeb92e7c8f416ae57a0307405081f7fa0610fcffeac6914ea1ad60" $h) hub}}
   {{hub- $ttl := (dig "keyTtl" "720h" $h) hub}}
+  {{hub- $renew := (dig "renewBefore" "168h" $h) hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $ttl) hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.keyTtl %s must be a whole number of hours, for example 720h" $ttl) hub}}{{hub- end hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $renew) hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.renewBefore %s must be a whole number of hours, for example 168h" $renew) hub}}{{hub- end hub}}
+  {{hub- if gt (atoi (trimSuffix "h" $ttl)) 2160 hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.keyTtl %s exceeds 2160h; Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys longer than 90 days" $ttl) hub}}{{hub- end hub}}
+  {{hub- if ge (atoi (trimSuffix "h" $renew)) (atoi (trimSuffix "h" $ttl)) hub}}{{hub fail (printf "hermes-agent: config.hermesAgent.renewBefore %s must be shorter than keyTtl %s, or every start mints a new key" $renew $ttl) hub}}{{hub- end hub}}
   {{hub- $size := (dig "storageSize" "10Gi" $h) hub}}
   {{hub- $sc := (dig "storageClass" "" $h) hub}}
   {{hub- $ctx := (dig "contextLength" "" $h | toString) hub}}
@@ -62,8 +69,9 @@ object-templates-raw: |
       metadata:
         name: hermes-agent
         namespace: '{{hub $ns hub}}'
-  # Lets the bootstrap create the hermes-api-key Secret once and read it on every start.
-  # create cannot be restricted to a resourceName, so it is scoped to this namespace instead.
+  # Lets the bootstrap create its two Secrets, read them on every start, and replace the stored
+  # MaaS key when it renews. create cannot be restricted to a resourceName, so it is scoped to
+  # this namespace instead.
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: rbac.authorization.k8s.io/v1
@@ -78,8 +86,17 @@ object-templates-raw: |
             - secrets
           resourceNames:
             - hermes-api-key
+            - hermes-maas-key
           verbs:
             - get
+        - apiGroups:
+            - ''
+          resources:
+            - secrets
+          resourceNames:
+            - hermes-maas-key
+          verbs:
+            - patch
         - apiGroups:
             - ''
           resources:
@@ -159,14 +176,21 @@ object-templates-raw: |
           #   2. The MaaS API key. Minted with this pod's ServiceAccount token, which
           #      maas-api accepts because the model's accessGroups include
           #      system:serviceaccounts:<namespace>. The token is the auto-mounted one: a
-          #      token requested with an explicit audience is rejected with a 401.
+          #      token requested with an explicit audience is rejected with a 401. The key
+          #      is kept in the hermes-maas-key Secret with its expiry, so a restart reuses
+          #      a valid key instead of minting another, and a failed renewal can fall back
+          #      to the old key while it is still valid.
           #
           # Both keys go into the process environment, the only place Hermes reads them.
           # An initContainer could not do this: env is resolved before the container
-          # starts, so a key written to a file or a Secret by an initContainer arrives one
-          # restart late. For the same reason the MaaS key cannot be refreshed in a
-          # running pod, so its TTL must exceed the longest expected pod lifetime; a
-          # restart mints a new one.
+          # starts, so a key written by an initContainer arrives one restart late. For the
+          # same reason a running Hermes cannot take a new MaaS key, so renewal is a
+          # restart: Hermes runs under timeout(1), which stops it when the key enters its
+          # renewal window (MAAS_KEY_RENEW_BEFORE ahead of expiry). The container exits
+          # with status 124, the kubelet restarts it in the same pod, and this script mints
+          # the replacement. That restart, roughly every keyTtl minus renewBefore, is the
+          # renewal working, not a fault. Replaced keys are not revoked; each expires at
+          # the end of its own TTL.
           #
           # Every secret travels on stdin. Nothing below prints a key.
           set -euo pipefail
@@ -177,8 +201,12 @@ object-templates-raw: |
           MAAS_API_BASE="${MAAS_API_BASE:?MAAS_API_BASE must be set}"
           MAAS_SUBSCRIPTION="${MAAS_SUBSCRIPTION:?MAAS_SUBSCRIPTION must be set}"
           MAAS_KEY_TTL="${MAAS_KEY_TTL:-720h}"
+          MAAS_KEY_RENEW_BEFORE="${MAAS_KEY_RENEW_BEFORE:-168h}"
+          MAAS_KEY_SECRET="${HERMES_MAAS_KEY_SECRET:-hermes-maas-key}"
           ATTEMPTS="${MAAS_MINT_ATTEMPTS:-10}"
           log() { printf '[bootstrap] %s\n' "$*" >&2; }
+          hours_to_seconds() { printf '%s' "$(( ${1%h} * 3600 ))"; }
+          utc() { date -u -d "@$1" +%FT%TZ; }
           # kube METHOD PATH: call the Kubernetes API as this ServiceAccount. A request
           # body, when there is one, is read from stdin. Prints the body, then the HTTP
           # status on its own final line (000 when there was no response at all).
@@ -188,6 +216,8 @@ object-templates-raw: |
                           -X "$1" --write-out '\n%{http_code}')
               if [[ "$1" == POST ]]; then
                   args+=(-H 'Content-Type: application/json' --data-binary @-)
+              elif [[ "$1" == PATCH ]]; then
+                  args+=(-H 'Content-Type: application/merge-patch+json' --data-binary @-)
               fi
               curl "${args[@]}" "${KUBE_API}$2" 2>/dev/null || printf '\n000'
           }
@@ -233,54 +263,134 @@ object-templates-raw: |
           export API_SERVER_KEY="$api_key"
           unset api_key resp created
           # --- 2. MaaS API key --------------------------------------------------------
-          curl_tls=()
-          if [[ -n "${SSL_CERT_FILE:-}" && -r "${SSL_CERT_FILE}" ]]; then
-              curl_tls=(--cacert "$SSL_CERT_FILE")
-          fi
-          body="$(python3 -c '
-          import json, os
-          print(json.dumps({"name": "hermes-agent",
-                            "description": "Minted at pod start by the AutoShift hermes-agent policy",
-                            "expiresIn": os.environ["MAAS_KEY_TTL"],
-                            "subscription": os.environ["MAAS_SUBSCRIPTION"]}))')"
-          maas_key=""
-          for attempt in $(seq 1 "$ATTEMPTS"); do
-              resp="$(printf '%s' "$body" | curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
-                  --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
-                  -H "Authorization: Bearer $(cat "${SA_DIR}/token")" \
-                  -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
-              code="${resp##*$'\n'}"
-              if [[ "$code" == 200 || "$code" == 201 ]]; then
-                  maas_key="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
-          import json, sys
-          print(json.load(sys.stdin).get("key", ""))')"
-                  if [[ -n "$maas_key" ]]; then
-                      log "minted MaaS key (subscription ${MAAS_SUBSCRIPTION}, ttl ${MAAS_KEY_TTL})"
-                      break
-                  fi
-                  log "attempt ${attempt}/${ATTEMPTS}: HTTP ${code} but no key in the response"
-              elif [[ "$code" == 000 ]]; then
-                  # No HTTP response: DNS, TLS or connectivity. Expected while a cold
-                  # cluster's gateway comes up, which is what this retry loop is for.
-                  log "attempt ${attempt}/${ATTEMPTS}: no HTTP response from ${MAAS_API_BASE}"
-              else
-                  log "attempt ${attempt}/${ATTEMPTS}: mint rejected, HTTP ${code}"
-              fi
-              if (( attempt < ATTEMPTS )); then
-                  sleep $(( attempt < 6 ? attempt * 5 : 30 ))
-              fi
-          done
-          if [[ -z "$maas_key" ]]; then
-              # Exit rather than start keyless: a keyless Hermes answers 401 from its
-              # model, which looks like a MaaS outage rather than a startup failure.
-              log "FATAL: no MaaS key after ${ATTEMPTS} attempts. Check that subscription ${MAAS_SUBSCRIPTION} exists and that its accessGroups include system:serviceaccounts:${NAMESPACE}."
+          # What the stored key was minted for. A change of gateway, subscription or TTL
+          # needs a new key even if the old one is still valid.
+          want_hash="$(printf '%s\n' "$MAAS_API_BASE" "$MAAS_SUBSCRIPTION" "$MAAS_KEY_TTL" | sha256sum | cut -c1-16)"
+          key_path="/api/v1/namespaces/${NAMESPACE}/secrets/${MAAS_KEY_SECRET}"
+          resp="$(kube GET "$key_path" </dev/null)"
+          code="${resp##*$'\n'}"
+          have_key=""; have_hash=""; expires_at=0; key_exists=false
+          if [[ "$code" == 200 ]]; then
+              key_exists=true
+              fields="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import base64, json, sys
+          d = json.load(sys.stdin)
+          a = d.get("metadata", {}).get("annotations") or {}
+          k = (d.get("data") or {}).get("MAAS_API_KEY", "")
+          print(base64.b64decode(k).decode() if k else "")
+          print(a.get("hermes.autoshift.io/config-hash", ""))
+          print(a.get("hermes.autoshift.io/expires-at", "0"))')"
+              have_key="$(sed -n 1p <<<"$fields")"
+              have_hash="$(sed -n 2p <<<"$fields")"
+              expires_at="$(sed -n 3p <<<"$fields")"
+              [[ "$expires_at" =~ ^[0-9]+$ ]] || expires_at=0
+              unset fields
+          elif [[ "$code" != 404 ]]; then
+              log "FATAL: cannot read Secret ${MAAS_KEY_SECRET} (HTTP ${code}). Check the hermes-api-key Role."
               exit 1
           fi
+          now="$(date -u +%s)"
+          renew_s="$(hours_to_seconds "$MAAS_KEY_RENEW_BEFORE")"
+          reason=""
+          if [[ -z "$have_key" ]]; then reason="no stored key"
+          elif [[ "$have_hash" != "$want_hash" ]]; then reason="gateway, subscription or TTL changed"
+          elif (( now >= expires_at - renew_s )); then reason="key expires at $(utc "$expires_at")"
+          fi
+          if [[ -z "$reason" ]]; then
+              maas_key="$have_key"
+              log "reusing stored MaaS key, valid until $(utc "$expires_at")"
+          else
+              log "minting a MaaS key: ${reason}"
+              curl_tls=()
+              if [[ -n "${SSL_CERT_FILE:-}" && -r "${SSL_CERT_FILE}" ]]; then
+                  curl_tls=(--cacert "$SSL_CERT_FILE")
+              fi
+              body="$(python3 -c '
+          import json, os
+          print(json.dumps({"name": "hermes-agent",
+                            "description": "Minted by the AutoShift hermes-agent policy",
+                            "expiresIn": os.environ["MAAS_KEY_TTL"],
+                            "subscription": os.environ["MAAS_SUBSCRIPTION"]}))')"
+              maas_key=""
+              for attempt in $(seq 1 "$ATTEMPTS"); do
+                  resp="$(printf '%s' "$body" | curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
+                      --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
+                      -H "Authorization: Bearer $(cat "${SA_DIR}/token")" \
+                      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
+                  code="${resp##*$'\n'}"
+                  if [[ "$code" == 200 || "$code" == 201 ]]; then
+                      maas_key="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import json, sys
+          print(json.load(sys.stdin).get("key", ""))')"
+                      [[ -n "$maas_key" ]] && break
+                      log "attempt ${attempt}/${ATTEMPTS}: HTTP ${code} but no key in the response"
+                  elif [[ "$code" == 000 ]]; then
+                      # No HTTP response: DNS, TLS or connectivity. Expected while a cold
+                      # cluster's gateway comes up, which is what this retry loop is for.
+                      log "attempt ${attempt}/${ATTEMPTS}: no HTTP response from ${MAAS_API_BASE}"
+                  else
+                      log "attempt ${attempt}/${ATTEMPTS}: mint rejected, HTTP ${code}"
+                  fi
+                  if (( attempt < ATTEMPTS )); then
+                      sleep $(( attempt < 6 ? attempt * 5 : 30 ))
+                  fi
+              done
+              unset resp body
+              if [[ -n "$maas_key" ]]; then
+                  # Expiry counted from before the mint, so it is never later than the real one.
+                  expires_at=$(( now + $(hours_to_seconds "$MAAS_KEY_TTL") ))
+                  if $key_exists; then method=PATCH; path="$key_path"; else method=POST; path="/api/v1/namespaces/${NAMESPACE}/secrets"; fi
+                  stored="$(printf '%s' "$maas_key" | python3 -c '
+          import base64, json, sys
+          key = sys.stdin.read()
+          print(json.dumps({
+              "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+              "metadata": {"name": sys.argv[1],
+                           "labels": {"app.kubernetes.io/name": "hermes-agent",
+                                      "app.kubernetes.io/managed-by": "hermes-bootstrap"},
+                           "annotations": {"hermes.autoshift.io/expires-at": sys.argv[2],
+                                           "hermes.autoshift.io/config-hash": sys.argv[3],
+                                           "hermes.autoshift.io/minted-at": sys.argv[4]}},
+              "data": {"MAAS_API_KEY": base64.b64encode(key.encode()).decode()}}))' \
+                      "$MAAS_KEY_SECRET" "$expires_at" "$want_hash" "$now" | kube "$method" "$path")"
+                  code="${stored##*$'\n'}"
+                  unset stored
+                  if [[ "$code" != 200 && "$code" != 201 ]]; then
+                      log "FATAL: minted a MaaS key but cannot store it in Secret ${MAAS_KEY_SECRET} (HTTP ${code}). Check the hermes-api-key Role."
+                      exit 1
+                  fi
+                  log "minted MaaS key (subscription ${MAAS_SUBSCRIPTION}, ttl ${MAAS_KEY_TTL}), valid until $(utc "$expires_at")"
+              elif [[ -n "$have_key" && "$have_hash" == "$want_hash" ]] && (( now < expires_at - 600 )); then
+                  # Renewal failed but the old key still works: keep serving on it and try
+                  # again in an hour rather than take Hermes down early.
+                  maas_key="$have_key"
+                  retry_at=$(( now + 3600 ))
+                  (( retry_at > expires_at - 600 )) && retry_at=$(( expires_at - 600 ))
+                  log "WARNING: renewal failed; using the stored key, valid until $(utc "$expires_at"), and retrying at $(utc "$retry_at")"
+              else
+                  # Exit rather than start keyless: a keyless Hermes answers 401 from its
+                  # model, which looks like a MaaS outage rather than a startup failure.
+                  log "FATAL: no MaaS key after ${ATTEMPTS} attempts. Check that subscription ${MAAS_SUBSCRIPTION} exists and that its accessGroups include system:serviceaccounts:${NAMESPACE}."
+                  exit 1
+              fi
+          fi
           export OPENAI_API_KEY="$maas_key"
-          unset maas_key resp body
+          unset maas_key have_key
+          # When to stop Hermes so this script can renew the key: at the start of the
+          # renewal window, or, after a failed renewal (already inside that window), at the
+          # retry time. Never under five minutes, so a key stored just inside its window
+          # cannot cause a restart loop.
+          restart_at=$(( expires_at - renew_s ))
+          if [[ -n "${retry_at:-}" ]]; then restart_at="$retry_at"; fi
+          run_for=$(( restart_at - now ))
+          (( run_for < 300 )) && run_for=300
+          log "Hermes will restart for key renewal at $(utc $(( now + run_for )))"
           # --- hand off ---------------------------------------------------------------
-          # The image's own ENTRYPOINT; the container's args supply its CMD.
-          exec /usr/local/bin/tini -g -- /opt/hermes/docker/entrypoint-openshift.sh "$@"
+          # The image's own ENTRYPOINT; the container's args supply its CMD. timeout is
+          # PID 1 and forwards SIGTERM, so pod shutdown still reaches Hermes; tini -s
+          # registers as a subreaper because it is no longer PID 1.
+          exec timeout --signal=TERM --kill-after=60s "${run_for}s" \
+              /usr/local/bin/tini -s -g -- /opt/hermes/docker/entrypoint-openshift.sh "$@"
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: apps/v1
@@ -302,7 +412,7 @@ object-templates-raw: |
             labels:
               app.kubernetes.io/name: hermes-agent
             annotations:
-              autoshift.io/hermes-bootstrap-revision: '1'
+              autoshift.io/hermes-bootstrap-revision: '2'
           spec:
             serviceAccountName: hermes-agent
             securityContext:
@@ -397,12 +507,16 @@ object-templates-raw: |
                     value: 'https://{{ $host }}'
                   - name: MAAS_SUBSCRIPTION
                     value: '{{hub $model hub}}-default'
-                  # Must exceed the longest expected pod lifetime: the key is pinned in the
-                  # process environment and a running pod cannot replace it.
+                  # A running Hermes cannot take a new key, so the container restarts when the
+                  # key is MAAS_KEY_RENEW_BEFORE from expiry, and the bootstrap mints another.
                   - name: MAAS_KEY_TTL
                     value: '{{hub $ttl hub}}'
+                  - name: MAAS_KEY_RENEW_BEFORE
+                    value: '{{hub $renew hub}}'
                   - name: HERMES_API_KEY_SECRET
                     value: hermes-api-key
+                  - name: HERMES_MAAS_KEY_SECRET
+                    value: hermes-maas-key
                   # Without this the gateway starts but binds no listener, and every probe fails.
                   - name: API_SERVER_ENABLED
                     value: 'true'

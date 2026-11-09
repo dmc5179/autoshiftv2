@@ -53,6 +53,25 @@ policies:
             system:serviceaccounts:<hermes namespace> to that model's
             config.openshiftAiModels.models[].accessGroups, or check that the
             model's MaaSSubscription exists.
+  # inform: is the MaaS key valid and renewing itself? Clock-based, so it cannot use watch:
+  # nothing changes on the cluster when a key ages. A fixed interval re-evaluates it.
+  - name: policy-hermes-agent-key
+    remediationAction: inform
+    consolidateManifests: false
+    evaluationInterval:
+      compliant: 1h
+      noncompliant: 10m
+    dependencies:
+      - name: policy-hermes-agent
+    manifests:
+      - path: test/hermes-agent-key.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Hermes' Models-as-a-Service key has expired, or its renewal is
+            overdue. The pod renews the key by restarting at the start of the
+            renewal window and minting a new one. The reason it did not is in
+            its log: oc logs deploy/hermes-agent -n hermes. A 403 means
+            accessGroups; no HTTP response means maas-api or the gateway is down.
   # inform: did Hermes come up, and did its bootstrap create the API key Open WebUI depends on.
   - name: policy-hermes-agent-ready
     remediationAction: inform

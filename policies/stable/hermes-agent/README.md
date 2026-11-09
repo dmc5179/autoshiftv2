@@ -17,6 +17,7 @@ config:
     model: 'granite-4-tiny-gpu'      # required: a model name in config.openshiftAiModels.models
     namespace: 'hermes'
     keyTtl: '720h'
+    renewBefore: '168h'
     storageSize: '10Gi'
     storageClass: 'gp3-csi'
 ```
@@ -26,7 +27,8 @@ config:
 | `model` | | Required. The name of a model in `config.openshiftAiModels.models`, not a request model id |
 | `namespace` | `hermes` | Must match the ServiceAccount group in that model's `accessGroups` |
 | `image` | the verified pin | Hermes image, pinned by digest |
-| `keyTtl` | `720h` | Lifetime of the MaaS key the pod mints. See [Key lifetime](#key-lifetime) |
+| `keyTtl` | `720h` | Lifetime of the MaaS key the pod mints, at most `2160h`. See [Key renewal](#key-renewal) |
+| `renewBefore` | `168h` | How long before expiry the key is renewed. Must be shorter than `keyTtl` |
 | `storageSize` | `10Gi` | Memory, skills and conversation history |
 | `storageClass` | cluster default | Set only to override the default StorageClass |
 | `contextLength` | read from the gateway | Set only when Hermes cannot read the model's context window |
@@ -57,6 +59,7 @@ The rest is derived, so it cannot disagree with `openshift-ai-models`:
 | `policy-hermes-agent` | enforce | Namespace, ServiceAccount, the `hermes-api-key` Role, PVC, gateway CA, bootstrap script, Deployment and Service |
 | `policy-hermes-agent-access` | inform | The model grants the ServiceAccounts in this namespace, and its subscription exists |
 | `policy-hermes-agent-ready` | inform | The Deployment is Available and its `hermes-api-key` Secret exists |
+| `policy-hermes-agent-key` | inform | The MaaS key has not expired, and its renewal is not more than two hours overdue. Evaluated hourly rather than on change, because a key ages without any event |
 
 ## Credentials
 
@@ -64,21 +67,41 @@ None come from git or from this policy. RHACM policy templates have no random-nu
 so the pod handles both credentials itself at startup, in a bootstrap script that then starts
 Hermes:
 
-- **MaaS key.** Minted with the pod's own ServiceAccount token. A restart mints a new one, and
-  no person's credential is involved. The token is the automatically mounted one: a token
-  requested with an explicit audience is rejected with a 401.
+- **MaaS key.** Minted with the pod's own ServiceAccount token, so no person's credential is
+  involved, and kept with its expiry in the `hermes-maas-key` Secret. The token is the
+  automatically mounted one: a token requested with an explicit audience is rejected with a 401.
 - **Hermes API key** (`API_SERVER_KEY`), which Open WebUI presents to Hermes. On first start the
-  pod creates the `hermes-api-key` Secret with a random value, then reads it on every start. A
-  Role grants `get` on that Secret and `create` on Secrets in this namespace.
+  pod creates the `hermes-api-key` Secret with a random value, then reads it on every start. The
+  Role grants `get` on both Secrets, `patch` on `hermes-maas-key`, and `create` on Secrets in
+  this namespace.
 
-Both keys exist only in the process environment and in that one Secret.
+Both keys exist only in the process environment and in those two Secrets.
 
-## Key lifetime
+## Key renewal
 
-The MaaS key is fixed for the life of the pod: it lives in the process environment, and a
-running process cannot replace it. `keyTtl` must therefore exceed the longest expected pod
-lifetime, not the restart interval. A short value expires in a running pod, after which Hermes
-answers every request with a 401 from its model, and no probe treats that as unhealthy.
+The key renews itself, with no CronJob and no person involved. Hermes reads the key from its
+process environment, and a running process cannot take a new one, so renewal is a container
+restart:
+
+1. At start, the bootstrap reuses the stored key if it is outside its renewal window and was
+   minted for the current gateway, subscription and `keyTtl`. Otherwise it mints a new key and
+   stores it.
+2. It starts Hermes under `timeout`, set to stop it when the key enters its renewal window,
+   `renewBefore` ahead of expiry.
+3. The container exits with status 124, the kubelet restarts it in the same pod, and step 1 mints
+   the replacement.
+
+With the defaults that is one restart about every 22 days (`720h` minus `168h`), taking well
+under a minute. A restart count that climbs by one at that interval, with exit code 124, is
+renewal working.
+
+If maas-api refuses or cannot be reached when renewal is due, Hermes keeps running on the old key
+while it is valid and retries in an hour, rather than going down early.
+`policy-hermes-agent-key` reports a key that has expired, or whose renewal is more than two hours
+overdue. Replaced keys are not revoked; each expires at the end of its own TTL.
+
+`keyTtl` is capped at `2160h` because Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys
+longer than 90 days. The same keys and limits are used by the `openshell` policy.
 
 ## Updating
 

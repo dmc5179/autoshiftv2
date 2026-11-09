@@ -43,3 +43,31 @@ metadata:
 type: Opaque
 data:
   API_SERVER_KEY: ZmFrZS1hcGkta2V5
+---
+# Created and renewed by the hermes-agent pod. policy-hermes-agent-key reads its expiry
+# annotations; the expiry here is far in the future so the check resolves as Compliant.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hermes-maas-key
+  namespace: hermes
+  annotations:
+    hermes.autoshift.io/expires-at: '4102444800'
+    hermes.autoshift.io/config-hash: 'fakefakefakefake'
+    hermes.autoshift.io/minted-at: '4099852800'
+type: Opaque
+data:
+  MAAS_API_KEY: ZmFrZS1tYWFzLWtleQ==
+---
+# Shipped in the OpenShift release payload. open-webui resolves the oauth-proxy image from it
+# when config.openWebui.auth is openshift.
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: oauth-proxy
+  namespace: openshift
+status:
+  tags:
+    - tag: v4.4
+      items:
+        - dockerImageReference: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:0000000000000000000000000000000000000000000000000000000000000000

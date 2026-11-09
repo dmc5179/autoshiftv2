@@ -2,8 +2,10 @@
 #
 # inform-only. The enforcing policy goes Compliant once the Deployment matches its template; the
 # pod can still be waiting on the administrator password Secret, seeding models, or failing a
-# probe. When adminEmail is set, the Secret is checked here too, because a missing one is the
-# most likely reason the pod is not running: the pod deliberately does not start without it.
+# probe. With auth local and adminEmail set, the Secret is checked here too, because a missing
+# one is the most likely reason the pod is not running: the pod deliberately does not start
+# without it. With auth openshift there is no such Secret; the administrator signs in through
+# OpenShift.
 object-templates-raw: |
   {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
   {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
@@ -20,7 +22,7 @@ object-templates-raw: |
         namespace: '{{hub $ns hub}}'
       status:
         availableReplicas: 1
-  {{hub- if (dig "adminEmail" "" $o) hub}}
+  {{hub- if and (dig "adminEmail" "" $o) (ne (dig "auth" "local" $o) "openshift") hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: v1
