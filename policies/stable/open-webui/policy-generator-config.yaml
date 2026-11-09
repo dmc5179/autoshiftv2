@@ -52,3 +52,37 @@ policies:
             deliberate: the site is never reachable before its administrator
             exists. Create it in the open-webui namespace with the password under
             the configured key.
+  # inform: can Open WebUI's ServiceAccount mint a key for config.openWebui.maas.model? Without the
+  # key Open WebUI still starts, with Hermes only, so this names the cause.
+  - name: policy-open-webui-maas-access
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-open-webui
+    manifests:
+      - path: test/open-webui-maas-access.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Open WebUI cannot mint a Models-as-a-Service key for
+            config.openWebui.maas.model, so it offers Hermes only. Add
+            system:serviceaccounts:<open-webui namespace> to that model's
+            config.openshiftAiModels.models[].accessGroups, or check that the
+            model's MaaSSubscription exists.
+  # inform: is the MaaS key valid and renewing itself? Clock-based, so it runs on a fixed interval
+  # rather than on watch. Depends on -ready: the bootstrap stores the key before Open WebUI
+  # starts, so once the pod is Available the Secret exists.
+  - name: policy-open-webui-maas-key
+    remediationAction: inform
+    consolidateManifests: false
+    evaluationInterval:
+      compliant: 1h
+      noncompliant: 10m
+    dependencies:
+      - name: policy-open-webui-ready
+    manifests:
+      - path: test/open-webui-maas-key.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Open WebUI's Models-as-a-Service key is missing, expired or overdue
+            for renewal. Without it Open WebUI offers Hermes only. The open-webui
+            pod's [bootstrap] log says why.

@@ -28,8 +28,19 @@
 #     mount hides, so seed-models copies them onto the PVC once instead of every first start
 #     downloading them from HuggingFace (or failing to, on a disconnected cluster).
 #
+# Models-as-a-Service, config.openWebui.maas.model: a second OpenAI connection, straight to the
+# MaaS gateway, so users can also chat with that model without Hermes. One key serves every user:
+# the pod mints it with its ServiceAccount token, keeps it in the open-webui-maas-key Secret and
+# renews it by restarting, exactly as Hermes does. MaaS counts tokens per key owner, so all Open
+# WebUI users share that one owner's tokenRateLimit for the model. The model's accessGroups must
+# include system:serviceaccounts:<namespace>; policy-open-webui-maas-access reports it.
+#
 # Most settings below are read by Open WebUI only on its FIRST start and then stored in its
-# database, where the Admin Panel owns them. Changing them here later changes nothing.
+# database, where the Admin Panel owns them. Changing them here later changes nothing. The
+# exception is maas: a key that renews must reach Open WebUI at every start, so with maas set
+# ENABLE_PERSISTENT_CONFIG is False and the environment wins at every start. Admin Panel changes
+# to settings then last only until the pod restarts. Users, chats and per-model settings are not
+# settings in that sense and are kept.
 object-templates-raw: |
   {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
   {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
@@ -51,6 +62,28 @@ object-templates-raw: |
   {{hub- $groups := (dig "allowedGroups" (list "maas-users") $o) hub}}
   {{hub- if and $openshift (not $groups) hub}}{{hub fail "open-webui: config.openWebui.allowedGroups must name at least one group when auth is openshift" hub}}{{hub- end hub}}
   {{hub- $proxyImageCfg := (dig "proxyImage" "" $o) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $maasModel := (dig "maas" "model" "" $o) hub}}
+  {{hub- $maas := ne $maasModel "" hub}}
+  {{hub- $modelNs := (dig "namespace" "" $m) hub}}
+  {{hub- $ttl := (dig "maas" "keyTtl" "720h" $o) hub}}
+  {{hub- $renew := (dig "maas" "renewBefore" "168h" $o) hub}}
+  {{hub- $gwName := (dig "gateway" "name" "maas-default-gateway" $m) hub}}
+  {{hub- $gwNs := (dig "gateway" "namespace" "openshift-ingress" $m) hub}}
+  {{hub- $sa := "open-webui" hub}}
+  {{hub- if $openshift hub}}{{hub- $sa = "open-webui-proxy" hub}}{{hub- end hub}}
+  {{hub- if $maas hub}}
+  {{hub- if not $modelNs hub}}{{hub fail "open-webui: config.openshiftAiModels.namespace is required for config.openWebui.maas" hub}}{{hub- end hub}}
+  {{hub- $found := false hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $maasModel hub}}{{hub- $found = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $found hub}}{{hub fail (printf "open-webui: config.openWebui.maas.model %s is not a model in config.openshiftAiModels.models" $maasModel) hub}}{{hub- end hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $ttl) hub}}{{hub fail (printf "open-webui: config.openWebui.maas.keyTtl %s must be a whole number of hours, for example 720h" $ttl) hub}}{{hub- end hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $renew) hub}}{{hub fail (printf "open-webui: config.openWebui.maas.renewBefore %s must be a whole number of hours, for example 168h" $renew) hub}}{{hub- end hub}}
+  {{hub- if gt (atoi (trimSuffix "h" $ttl)) 2160 hub}}{{hub fail (printf "open-webui: config.openWebui.maas.keyTtl %s exceeds 2160h; Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys longer than 90 days" $ttl) hub}}{{hub- end hub}}
+  {{hub- if ge (atoi (trimSuffix "h" $renew)) (atoi (trimSuffix "h" $ttl)) hub}}{{hub fail (printf "open-webui: config.openWebui.maas.renewBefore %s must be shorter than keyTtl %s, or every start mints a new key" $renew $ttl) hub}}{{hub- end hub}}
+  {{hub- end hub}}
   {{- $host := "{{hub $routeHost hub}}" }}
   {{- if not $host }}
   {{- $domain := (dig "spec" "domain" "" ((lookup "config.openshift.io/v1" "Ingress" "" "cluster") | default dict)) }}
@@ -59,6 +92,14 @@ object-templates-raw: |
   {{- end }}
   {{- $hermesKey := (fromSecret "{{hub $hns hub}}" "hermes-api-key" "API_SERVER_KEY") }}
   {{- if not $hermesKey }}{{ fail "open-webui: Secret {{hub $hns hub}}/hermes-api-key does not exist yet. The Hermes pod creates it on first start; check policy-hermes-agent-ready" }}{{- end }}
+  {{- $gwHost := "" }}
+  {{hub- if $maas hub}}
+  {{- $gw := (lookup "gateway.networking.k8s.io/v1" "Gateway" "{{hub $gwNs hub}}" "{{hub $gwName hub}}") | default dict }}
+  {{- range $l := (dig "spec" "listeners" (list) $gw) }}
+  {{- if and (not $gwHost) (eq (dig "protocol" "" $l) "HTTPS") }}{{- $gwHost = (dig "hostname" "" $l) }}{{- end }}
+  {{- end }}
+  {{- if not $gwHost }}{{ fail "open-webui: no HTTPS listener hostname on Gateway {{hub $gwNs hub}}/{{hub $gwName hub}}; check policy-openshift-ai-maas-ready" }}{{- end }}
+  {{hub- end hub}}
   {{hub- if $openshift hub}}
   # The cluster's own oauth-proxy, from the release payload, so it matches the cluster version and
   # a disconnected mirror of the release already carries it.
@@ -159,6 +200,312 @@ object-templates-raw: |
           name: '{{hub $g hub}}'
         {{hub- end hub}}
   {{hub- end hub}}
+  {{hub- if $maas hub}}
+  {{hub- if not $openshift hub}}
+  # The identity that mints the MaaS key. With auth openshift the pod already runs as
+  # open-webui-proxy, which is in the same system:serviceaccounts:<namespace> group.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: open-webui
+        namespace: '{{hub $ns hub}}'
+  {{hub- end hub}}
+  # Lets the bootstrap create the MaaS key Secret, read it on every start and replace it when the
+  # key renews. create cannot be restricted to a resourceName, so it is scoped to this namespace.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: open-webui-maas-key
+        namespace: '{{hub $ns hub}}'
+      rules:
+        - apiGroups:
+            - ''
+          resources:
+            - secrets
+          resourceNames:
+            - open-webui-maas-key
+          verbs:
+            - get
+            - patch
+        - apiGroups:
+            - ''
+          resources:
+            - secrets
+          verbs:
+            - create
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: open-webui-maas-key
+        namespace: '{{hub $ns hub}}'
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: open-webui-maas-key
+      subjects:
+        - kind: ServiceAccount
+          name: '{{hub $sa hub}}'
+          namespace: '{{hub $ns hub}}'
+  # The CA that signs the MaaS gateway certificate, as for Hermes. build-trust-bundle appends it
+  # to the system trust store.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: open-webui-ingress-ca
+        namespace: '{{hub $ns hub}}'
+      data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'
+  # The startup wrapper. A ConfigMap change does not restart the pod; bump
+  # autoshift.io/open-webui-bootstrap-revision on the Deployment's pod template when this changes.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: open-webui-bootstrap
+        namespace: '{{hub $ns hub}}'
+      data:
+        open-webui-bootstrap.sh: |
+          #!/usr/bin/env bash
+          # Open WebUI startup wrapper, delivered by the AutoShift open-webui policy when
+          # config.openWebui.maas.model is set.
+          #
+          # Gives Open WebUI a second OpenAI connection, to the Models-as-a-Service gateway,
+          # next to Hermes. The MaaS key is minted with this pod's ServiceAccount token, which
+          # maas-api accepts because the model's accessGroups include
+          # system:serviceaccounts:<namespace>, and kept with its expiry in the
+          # open-webui-maas-key Secret, so a restart reuses a valid key. Both connection keys go
+          # into the process environment, which Open WebUI reads at every start because the
+          # policy sets ENABLE_PERSISTENT_CONFIG=False.
+          #
+          # Renewal works as it does for Hermes: Open WebUI runs under timeout(1), which stops
+          # it when the key enters its renewal window. The container exits with status 124, the
+          # kubelet restarts it in the same pod, this script mints the replacement and then
+          # revokes the key it replaced.
+          #
+          # Unlike Hermes, Open WebUI is still useful without the key, so no failure here stops
+          # it: without a MaaS key it starts with the Hermes connection only and retries in an
+          # hour. policy-open-webui-maas-key reports the missing key meanwhile.
+          #
+          # Every secret travels on stdin or in the environment. Nothing below prints a key.
+          set -euo pipefail
+          SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+          NAMESPACE="$(cat "${SA_DIR}/namespace")"
+          KUBE_API="${KUBE_API:-https://kubernetes.default.svc}"
+          HERMES_URL="${HERMES_URL:?HERMES_URL must be set}"
+          HERMES_API_KEY="${HERMES_API_KEY:?HERMES_API_KEY must be set}"
+          MAAS_API_BASE="${MAAS_API_BASE:?MAAS_API_BASE must be set}"
+          MAAS_SUBSCRIPTION="${MAAS_SUBSCRIPTION:?MAAS_SUBSCRIPTION must be set}"
+          MAAS_KEY_TTL="${MAAS_KEY_TTL:-720h}"
+          MAAS_KEY_RENEW_BEFORE="${MAAS_KEY_RENEW_BEFORE:-168h}"
+          MAAS_KEY_SECRET="${MAAS_KEY_SECRET:-open-webui-maas-key}"
+          ATTEMPTS="${MAAS_MINT_ATTEMPTS:-10}"
+          log() { printf '[bootstrap] %s\n' "$*" >&2; }
+          hours_to_seconds() { printf '%s' "$(( ${1%h} * 3600 ))"; }
+          utc() { date -u -d "@$1" +%FT%TZ; }
+          # kube METHOD PATH: call the Kubernetes API as this ServiceAccount. A request
+          # body, when there is one, is read from stdin. Prints the body, then the HTTP
+          # status on its own final line (000 when there was no response at all).
+          kube() {
+              local args=(--silent --show-error --max-time 20 --cacert "${SA_DIR}/ca.crt"
+                          -H "Authorization: Bearer $(cat "${SA_DIR}/token")"
+                          -X "$1" --write-out '\n%{http_code}')
+              if [[ "$1" == POST ]]; then
+                  args+=(-H 'Content-Type: application/json' --data-binary @-)
+              elif [[ "$1" == PATCH ]]; then
+                  args+=(-H 'Content-Type: application/merge-patch+json' --data-binary @-)
+              fi
+              curl "${args[@]}" "${KUBE_API}$2" 2>/dev/null || printf '\n000'
+          }
+          # revoke ID WHAT: revoke a MaaS key this ServiceAccount minted. Never fatal: a key
+          # that cannot be revoked lapses at the end of its own TTL.
+          revoke() {
+              local code
+              code="$(curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
+                  --output /dev/null --write-out '%{http_code}' -X DELETE \
+                  "${MAAS_API_BASE}/maas-api/v1/api-keys/$1" \
+                  -H "Authorization: Bearer $(cat "${SA_DIR}/token")" 2>/dev/null || printf '000')"
+              case "$code" in
+                  200|202|204) log "revoked the $2 MaaS key $1" ;;
+                  404) log "the $2 MaaS key $1 was already gone" ;;
+                  *) log "WARNING: could not revoke the $2 MaaS key $1 (HTTP ${code}); it lapses at the end of its TTL" ;;
+              esac
+          }
+          curl_tls=()
+          if [[ -n "${SSL_CERT_FILE:-}" && -r "${SSL_CERT_FILE}" ]]; then
+              curl_tls=(--cacert "$SSL_CERT_FILE")
+          fi
+          # The administrator signs in through OpenShift, so its password is never used, but
+          # Open WebUI needs one to create the account: a random one, kept nowhere.
+          if [[ "${OWUI_RANDOM_ADMIN_PASSWORD:-}" == true ]]; then
+              WEBUI_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | base64)"
+              export WEBUI_ADMIN_PASSWORD
+          fi
+          # Sets maas_key and expires_at, and retry_at after a failed renewal. Returns 1, with
+          # the reason logged, when there is no usable key.
+          obtain_maas_key() {
+          # What the stored key was minted for. A change of gateway, subscription or TTL
+          # needs a new key even if the old one is still valid.
+          want_hash="$(printf '%s\n' "$MAAS_API_BASE" "$MAAS_SUBSCRIPTION" "$MAAS_KEY_TTL" | sha256sum | cut -c1-16)"
+          key_path="/api/v1/namespaces/${NAMESPACE}/secrets/${MAAS_KEY_SECRET}"
+          resp="$(kube GET "$key_path" </dev/null)"
+          code="${resp##*$'\n'}"
+          have_key=""; have_hash=""; have_id=""; expires_at=0; key_exists=false
+          if [[ "$code" == 200 ]]; then
+              key_exists=true
+              fields="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import base64, json, sys
+          d = json.load(sys.stdin)
+          a = d.get("metadata", {}).get("annotations") or {}
+          k = (d.get("data") or {}).get("MAAS_API_KEY", "")
+          print(base64.b64decode(k).decode() if k else "")
+          print(a.get("open-webui.autoshift.io/config-hash", ""))
+          print(a.get("open-webui.autoshift.io/expires-at", "0"))
+          print(a.get("open-webui.autoshift.io/key-id", ""))')"
+              have_key="$(sed -n 1p <<<"$fields")"
+              have_hash="$(sed -n 2p <<<"$fields")"
+              expires_at="$(sed -n 3p <<<"$fields")"
+              have_id="$(sed -n 4p <<<"$fields")"
+              [[ "$expires_at" =~ ^[0-9]+$ ]] || expires_at=0
+              unset fields
+          elif [[ "$code" != 404 ]]; then
+              log "WARNING: cannot read Secret ${MAAS_KEY_SECRET} (HTTP ${code}). Check the open-webui-maas-key Role."
+              return 1
+          fi
+          now="$(date -u +%s)"
+          renew_s="$(hours_to_seconds "$MAAS_KEY_RENEW_BEFORE")"
+          reason=""
+          if [[ -z "$have_key" ]]; then reason="no stored key"
+          elif [[ "$have_hash" != "$want_hash" ]]; then reason="gateway, subscription or TTL changed"
+          elif (( now >= expires_at - renew_s )); then reason="key expires at $(utc "$expires_at")"
+          fi
+          if [[ -z "$reason" ]]; then
+              maas_key="$have_key"
+              log "reusing stored MaaS key, valid until $(utc "$expires_at")"
+          else
+              log "minting a MaaS key: ${reason}"
+              body="$(python3 -c '
+          import json, os
+          print(json.dumps({"name": "open-webui",
+                            "description": "Minted by the AutoShift open-webui policy",
+                            "expiresIn": os.environ["MAAS_KEY_TTL"],
+                            "subscription": os.environ["MAAS_SUBSCRIPTION"]}))')"
+              maas_key=""; maas_id=""
+              for attempt in $(seq 1 "$ATTEMPTS"); do
+                  resp="$(printf '%s' "$body" | curl --silent --show-error --max-time 30 "${curl_tls[@]}" \
+                      --write-out '\n%{http_code}' -X POST "${MAAS_API_BASE}/maas-api/v1/api-keys" \
+                      -H "Authorization: Bearer $(cat "${SA_DIR}/token")" \
+                      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || printf '\n000')"
+                  code="${resp##*$'\n'}"
+                  if [[ "$code" == 200 || "$code" == 201 ]]; then
+                      minted="$(printf '%s' "${resp%$'\n'*}" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          print(d.get("key", ""))
+          print(d.get("id", ""))')"
+                      maas_key="$(sed -n 1p <<<"$minted")"
+                      maas_id="$(sed -n 2p <<<"$minted")"
+                      unset minted
+                      [[ -n "$maas_key" ]] && break
+                      log "attempt ${attempt}/${ATTEMPTS}: HTTP ${code} but no key in the response"
+                  elif [[ "$code" == 000 ]]; then
+                      # No HTTP response: DNS, TLS or connectivity. Expected while a cold
+                      # cluster's gateway comes up, which is what this retry loop is for.
+                      log "attempt ${attempt}/${ATTEMPTS}: no HTTP response from ${MAAS_API_BASE}"
+                  else
+                      log "attempt ${attempt}/${ATTEMPTS}: mint rejected, HTTP ${code}"
+                  fi
+                  if (( attempt < ATTEMPTS )); then
+                      sleep $(( attempt < 6 ? attempt * 5 : 30 ))
+                  fi
+              done
+              unset resp body
+              if [[ -n "$maas_key" ]]; then
+                  # Expiry counted from before the mint, so it is never later than the real one.
+                  expires_at=$(( now + $(hours_to_seconds "$MAAS_KEY_TTL") ))
+                  if $key_exists; then method=PATCH; path="$key_path"; else method=POST; path="/api/v1/namespaces/${NAMESPACE}/secrets"; fi
+                  stored="$(printf '%s' "$maas_key" | python3 -c '
+          import base64, json, sys
+          key = sys.stdin.read()
+          print(json.dumps({
+              "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+              "metadata": {"name": sys.argv[1],
+                           "labels": {"app.kubernetes.io/name": "open-webui",
+                                      "app.kubernetes.io/managed-by": "open-webui-bootstrap"},
+                           "annotations": {"open-webui.autoshift.io/expires-at": sys.argv[2],
+                                           "open-webui.autoshift.io/config-hash": sys.argv[3],
+                                           "open-webui.autoshift.io/minted-at": sys.argv[4],
+                                           "open-webui.autoshift.io/key-id": sys.argv[5]}},
+              "data": {"MAAS_API_KEY": base64.b64encode(key.encode()).decode()}}))' \
+                      "$MAAS_KEY_SECRET" "$expires_at" "$want_hash" "$now" "$maas_id" | kube "$method" "$path")"
+                  code="${stored##*$'\n'}"
+                  unset stored
+                  if [[ "$code" != 200 && "$code" != 201 ]]; then
+                      log "WARNING: minted a MaaS key but cannot store it in Secret ${MAAS_KEY_SECRET} (HTTP ${code}). Check the open-webui-maas-key Role."
+                      # Unstored, it would be orphaned and a retry would mint another, so revoke it.
+                      [[ -n "$maas_id" ]] && revoke "$maas_id" "unstored"
+                      return 1
+                  fi
+                  log "minted MaaS key (subscription ${MAAS_SUBSCRIPTION}, ttl ${MAAS_KEY_TTL}), valid until $(utc "$expires_at")"
+                  # Revoke the key this one replaced. Only after the new key is stored, so a
+                  # failure anywhere above leaves the old key working. Nothing else holds it:
+                  # the Deployment is Recreate and a renewal restarts this same container, so
+                  # the process that used it has already exited. A key belongs to its minter,
+                  # so this ServiceAccount may revoke it. Keys stored before key-id was
+                  # recorded have no id and lapse at the end of their TTL. After a gateway
+                  # change the old id is unknown to the new gateway, and the 404 is harmless.
+                  if [[ -n "$have_id" && "$have_id" != "$maas_id" ]]; then revoke "$have_id" replaced; fi
+              elif [[ -n "$have_key" && "$have_hash" == "$want_hash" ]] && (( now < expires_at - 600 )); then
+                  # Renewal failed but the old key still works: keep serving on it and try
+                  # again in an hour rather than take Hermes down early.
+                  maas_key="$have_key"
+                  retry_at=$(( now + 3600 ))
+                  (( retry_at > expires_at - 600 )) && retry_at=$(( expires_at - 600 ))
+                  log "WARNING: renewal failed; using the stored key, valid until $(utc "$expires_at"), and retrying at $(utc "$retry_at")"
+              else
+                  # Exit rather than start keyless: a keyless Hermes answers 401 from its
+                  # model, which looks like a MaaS outage rather than a startup failure.
+                  log "WARNING: no MaaS key after ${ATTEMPTS} attempts. Check that subscription ${MAAS_SUBSCRIPTION} exists and that its accessGroups include system:serviceaccounts:${NAMESPACE}."
+                  return 1
+              fi
+          fi
+          }
+          now="$(date -u +%s)"
+          renew_s="$(hours_to_seconds "$MAAS_KEY_RENEW_BEFORE")"
+          maas_key=""
+          why="key renewal"
+          if obtain_maas_key; then
+              export OPENAI_API_BASE_URLS="${HERMES_URL};${MAAS_API_BASE}/v1"
+              OPENAI_API_KEYS="${HERMES_API_KEY};${maas_key}"
+              # When to stop Open WebUI so this script can renew the key: at the start of the
+              # renewal window, or, after a failed renewal, at the retry time. Never under five
+              # minutes, so a key stored just inside its window cannot cause a restart loop.
+              restart_at=$(( expires_at - renew_s ))
+              if [[ -n "${retry_at:-}" ]]; then restart_at="$retry_at"; fi
+          else
+              log "WARNING: starting with the Hermes connection only"
+              export OPENAI_API_BASE_URLS="${HERMES_URL}"
+              OPENAI_API_KEYS="${HERMES_API_KEY}"
+              restart_at=$(( now + 3600 ))
+              why="a new MaaS key attempt"
+          fi
+          export OPENAI_API_KEYS
+          unset maas_key have_key HERMES_API_KEY OPENAI_API_KEY OPENAI_API_BASE_URL
+          run_for=$(( restart_at - now ))
+          (( run_for < 300 )) && run_for=300
+          log "Open WebUI will restart for ${why} at $(utc $(( now + run_for )))"
+          # --- hand off ---------------------------------------------------------------
+          # The image's own start script, with no arguments: it passes any it gets to uvicorn.
+          # timeout is PID 1 and forwards SIGTERM, so pod shutdown still reaches Open WebUI.
+          exec timeout --signal=TERM --kill-after=60s "${run_for}s" bash /app/backend/start.sh
+  {{hub- end hub}}
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: apps/v1
@@ -179,9 +526,13 @@ object-templates-raw: |
           metadata:
             labels:
               app.kubernetes.io/name: open-webui
+            {{hub- if $maas hub}}
+            annotations:
+              autoshift.io/open-webui-bootstrap-revision: '1'
+            {{hub- end hub}}
           spec:
-            {{hub- if $openshift hub}}
-            serviceAccountName: open-webui-proxy
+            {{hub- if or $openshift $maas hub}}
+            serviceAccountName: '{{hub $sa hub}}'
             {{hub- end hub}}
             securityContext:
               runAsNonRoot: true
@@ -252,11 +603,46 @@ object-templates-raw: |
                   - name: proxy-cookie
                     mountPath: /cookie
               {{hub- end hub}}
+              {{hub- if $maas hub}}
+              # SSL_CERT_FILE replaces the trust store rather than adding to it, so the bundle
+              # must hold the public CAs as well as the ingress CA. The image is Debian-based.
+              - name: build-trust-bundle
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                command:
+                  - /bin/sh
+                  - -c
+                  - cat /etc/ssl/certs/ca-certificates.crt /ingress-ca/ca-bundle.crt > /bundle/ca-bundle.crt
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                resources:
+                  requests:
+                    cpu: 10m
+                    memory: 32Mi
+                  limits:
+                    cpu: 100m
+                    memory: 64Mi
+                volumeMounts:
+                  - name: ca
+                    mountPath: /bundle
+                  - name: ingress-ca
+                    mountPath: /ingress-ca
+                    readOnly: true
+              {{hub- end hub}}
             containers:
               - name: open-webui
                 image: '{{hub $image hub}}'
                 imagePullPolicy: IfNotPresent
-                {{hub- if and $openshift $adminEmail hub}}
+                {{hub- if $maas hub}}
+                # Mints or reuses the MaaS key, builds both connections, then runs the image's
+                # start script under timeout(1) so the key renews by restarting.
+                command:
+                  - /bin/bash
+                  - /opt/open-webui-bootstrap/open-webui-bootstrap.sh
+                {{hub- else if and $openshift $adminEmail hub}}
                 # The administrator signs in through OpenShift, as the account whose email is
                 # adminEmail, so its password is never used. Open WebUI still needs one to create
                 # the account, so a random one is made here and kept nowhere.
@@ -266,6 +652,46 @@ object-templates-raw: |
                   - export WEBUI_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | base64)"; exec bash /app/backend/start.sh
                 {{hub- end hub}}
                 env:
+                  {{hub- if $maas hub}}
+                  # Two connections, Hermes and the MaaS gateway. The bootstrap builds
+                  # OPENAI_API_BASE_URLS and OPENAI_API_KEYS from these, with Hermes first.
+                  - name: HERMES_URL
+                    value: 'http://hermes-agent.{{hub $hns hub}}.svc.cluster.local:8642/v1'
+                  - name: HERMES_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: open-webui-hermes
+                        key: OPENAI_API_KEY
+                  - name: MAAS_API_BASE
+                    value: 'https://{{ $gwHost }}'
+                  - name: MAAS_SUBSCRIPTION
+                    value: '{{hub $maasModel hub}}-default'
+                  - name: MAAS_KEY_TTL
+                    value: '{{hub $ttl hub}}'
+                  - name: MAAS_KEY_RENEW_BEFORE
+                    value: '{{hub $renew hub}}'
+                  - name: MAAS_KEY_SECRET
+                    value: open-webui-maas-key
+                  # The renewed key must reach Open WebUI at every start, so the environment, not
+                  # the database, is authoritative for settings.
+                  - name: ENABLE_PERSISTENT_CONFIG
+                    value: 'False'
+                  # Open WebUI turns signup off in its database once the first account exists, and
+                  # that stored value no longer applies. Left at its default of true, the signup
+                  # form would let anyone who reaches the UI register a password account under an
+                  # address nobody has used yet, and be that user when its owner signs in. Trusted
+                  # header sign-in does not consult this flag, so OpenShift users still get in.
+                  - name: ENABLE_SIGNUP
+                    value: 'False'
+                  - name: SSL_CERT_FILE
+                    value: /etc/open-webui/ca/ca-bundle.crt
+                  - name: REQUESTS_CA_BUNDLE
+                    value: /etc/open-webui/ca/ca-bundle.crt
+                  {{hub- if and $openshift $adminEmail hub}}
+                  - name: OWUI_RANDOM_ADMIN_PASSWORD
+                    value: 'true'
+                  {{hub- end hub}}
+                  {{hub- else hub}}
                   # The connection to Hermes. Model id is always hermes-agent.
                   - name: OPENAI_API_BASE_URL
                     value: 'http://hermes-agent.{{hub $hns hub}}.svc.cluster.local:8642/v1'
@@ -274,6 +700,7 @@ object-templates-raw: |
                       secretKeyRef:
                         name: open-webui-hermes
                         key: OPENAI_API_KEY
+                  {{hub- end hub}}
                   - name: ENABLE_OPENAI_API
                     value: 'true'
                   - name: ENABLE_OLLAMA_API
@@ -433,6 +860,14 @@ object-templates-raw: |
                     mountPath: /app/backend/data
                   - name: tmp
                     mountPath: /tmp
+                  {{hub- if $maas hub}}
+                  - name: ca
+                    mountPath: /etc/open-webui/ca
+                    readOnly: true
+                  - name: bootstrap
+                    mountPath: /opt/open-webui-bootstrap
+                    readOnly: true
+                  {{hub- end hub}}
               {{hub- if $openshift hub}}
               # Signs users in with OpenShift and admits only those allowed to get the
               # open-webui-proxy Service. Three defaults are overridden on purpose:
@@ -501,6 +936,20 @@ object-templates-raw: |
                   claimName: open-webui-data
               - name: tmp
                 emptyDir: {}
+              {{hub- if $maas hub}}
+              - name: ingress-ca
+                configMap:
+                  name: open-webui-ingress-ca
+                  items:
+                    - key: ca-bundle.crt
+                      path: ca-bundle.crt
+              - name: ca
+                emptyDir: {}
+              - name: bootstrap
+                configMap:
+                  name: open-webui-bootstrap
+                  defaultMode: 365
+              {{hub- end hub}}
               {{hub- if $openshift hub}}
               - name: proxy-tls
                 secret:

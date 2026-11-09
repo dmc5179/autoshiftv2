@@ -295,6 +295,16 @@ hubClusterSets:
         adminSecretRef:                          # local only
           name: 'open-webui-admin'               # default open-webui-admin
           key: 'password'                        # default password
+        # Optional. A second connection, straight to a Models-as-a-Service model, next to
+        # Hermes. The pod mints and renews one key with its ServiceAccount, so that model's
+        # accessGroups must include system:serviceaccounts:<namespace>
+        # (policy-open-webui-maas-access reports it). Every user shares that one key, and
+        # MaaS counts tokens per key owner, so they share one tokenRateLimit. Setting it also
+        # sets ENABLE_PERSISTENT_CONFIG=False: Admin Panel settings then last until restart.
+        maas:
+          model: 'granite-4-tiny-gpu'            # a name in openshiftAiModels.models. Example value
+          keyTtl: '720h'                         # default 720h, at most 2160h
+          renewBefore: '168h'                    # default 168h, shorter than keyTtl
 
       # =======================================================================
       # openshift-lightspeed — the model the console assistant uses (DATA; the ENABLE flag is

@@ -2,7 +2,9 @@
 
 Deploys Open WebUI as the chat front end for the
 Hermes Agent that the `hermes-agent` policy deploys. Users sign in to Open WebUI and talk to
-Hermes, which is displayed as a single model named `hermes-agent`.
+Hermes, which is displayed as a single model named `hermes-agent`. Optionally, a second
+connection offers a Models-as-a-Service model directly, next to Hermes. See
+[Models-as-a-Service connection](#models-as-a-service-connection).
 
 ## Configuration
 
@@ -17,6 +19,8 @@ config:
     allowedGroups:
       - 'maas-users'
     adminEmail: 'alice@cluster.local'
+    maas:
+      model: 'granite-4-tiny-gpu'
 ```
 
 | Field | Default | Notes |
@@ -31,6 +35,9 @@ config:
 | `proxyImage` | from ImageStream `openshift/oauth-proxy` | `openshift` only. Override for the proxy image |
 | `adminEmail` | | Strongly recommended. See [Administrator](#administrator) |
 | `adminSecretRef.name` / `.key` | `open-webui-admin` / `password` | `local` only. Secret holding the administrator password |
+| `maas.model` | | Optional. A model name in `config.openshiftAiModels.models`, offered directly next to Hermes. See [Models-as-a-Service connection](#models-as-a-service-connection) |
+| `maas.keyTtl` | `720h` | Lifetime of the MaaS key the pod mints, whole hours, at most `2160h` |
+| `maas.renewBefore` | `168h` | How long before expiry the key is renewed. Must be shorter than `maas.keyTtl` |
 
 ## Sign-in
 
@@ -109,6 +116,8 @@ the namespace deletes every user, chat and upload.
 |--------|------|------|
 | `policy-open-webui` | enforce | Namespace, the copied Hermes key, PVC, Deployment, Service and Route; with `auth: openshift`, also the proxy ServiceAccount and the sign-in Role and RoleBinding |
 | `policy-open-webui-ready` | inform | The Deployment is Available, and with `auth: local` and `adminEmail` set, the administrator Secret exists |
+| `policy-open-webui-maas-access` | inform | With `maas.model` set: the model's `accessGroups` let this namespace's ServiceAccounts mint a key, and its subscription exists |
+| `policy-open-webui-maas-key` | inform | With `maas.model` set: the MaaS key exists, has not expired, and is not more than two hours overdue for renewal |
 
 ## How it connects to Hermes
 
@@ -138,6 +147,56 @@ Panel.
 The per-user `X-Hermes-Session-Key` header is not configured. Hermes uses it only for its optional
 Honcho memory provider, and the header value needs a template placeholder that policy templating
 would consume. Add it in **Admin Panel > Settings > Connections** if Honcho is enabled.
+
+## Models-as-a-Service connection
+
+With `maas.model` set, Open WebUI gets a second OpenAI connection, to the Models-as-a-Service
+gateway, and users can choose that model next to `hermes-agent`. It answers directly, without
+Hermes' tools, memory or 14,000-token system prompt.
+
+**Quota: every user shares one key, so every user shares one tokenRateLimit.** The pod mints a
+single MaaS key with its ServiceAccount, and Models-as-a-Service counts tokens per key owner and
+subscription. One heavy user can therefore exhaust the model's limit for all Open WebUI users.
+Usage in MaaS is attributed to the ServiceAccount, not to the person; Open WebUI's own chat history
+is the only per-user record. Hermes has its own key and owner, so it is not affected.
+
+The model's `accessGroups` must include `system:serviceaccounts:<namespace>`, the group of the
+pod's ServiceAccount (`open-webui-proxy` with `auth: openshift`, `open-webui` otherwise).
+`policy-open-webui-maas-access` reports it.
+
+How the key works, as for Hermes:
+
+1. At start, a bootstrap in the Open WebUI container reuses the key stored in the
+   `open-webui-maas-key` Secret, or mints and stores a new one. It passes both connections to Open
+   WebUI in `OPENAI_API_BASE_URLS` and `OPENAI_API_KEYS`, Hermes first.
+2. It starts Open WebUI under `timeout`, set to stop it when the key enters its renewal window.
+   The container exits with status 124, the kubelet restarts it in the same pod, and step 1 mints
+   the replacement and revokes the key it replaced. With the defaults that is one restart about
+   every 22 days, and Open WebUI is unavailable for the minute it takes to start.
+3. If no key can be minted, Open WebUI starts anyway with the Hermes connection only, and retries
+   an hour later. `policy-open-webui-maas-key` reports the missing key meanwhile.
+
+### Settings come from the policy, not the Admin Panel
+
+A renewed key must reach Open WebUI at every start, but Open WebUI normally reads connection
+settings from the environment on first start only. With `maas.model` set, the policy therefore
+sets `ENABLE_PERSISTENT_CONFIG=False`, and Open WebUI takes every setting from the environment at
+every start. The cost: a setting changed in the Admin Panel lasts only until the pod next restarts,
+which includes each key renewal. Users, chats, uploads and per-model settings are stored data, not
+settings, and are kept.
+
+It also sets `ENABLE_SIGNUP=False`. Open WebUI turns signup off in its database once the first
+account exists, and that stored value no longer applies; left at its default, the signup form
+would let anyone who reaches the UI register a password account under an address nobody has used
+yet, and be that user when its owner signs in. Trusted-header sign-in does not consult the flag.
+
+### Adding it to an existing install
+
+Set `maas.model` and add the group to the model's `accessGroups`. The Deployment changes, so the
+pod restarts once and mints its key. Settings an administrator changed in the Admin Panel revert
+to the policy's values at that restart; to keep one, set it in this policy, if it is exposed, or
+accept the default. Removing `maas.model` later restores database-held settings as they were
+before.
 
 ## OpenShift specifics
 

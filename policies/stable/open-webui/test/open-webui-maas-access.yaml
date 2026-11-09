@@ -1,0 +1,45 @@
+# Can Open WebUI mint a Models-as-a-Service key for config.openWebui.maas.model?
+#
+# inform-only. maas-api checks group membership only, and the pod's ServiceAccount is a member of
+# system:serviceaccounts:<namespace>, of system:serviceaccounts and of system:authenticated. If
+# the model grants none of those, the bootstrap is refused with a 403 and Open WebUI starts with
+# the Hermes connection only, which looks like a missing model rather than a refused key.
+#
+# The group check is resolved on the hub from the same config the workload policy reads. The
+# object below then asserts that the model's subscription exists. Without maas configured there
+# is nothing to check, and the policy only asserts the namespace.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $o := (index $cfg "openWebui" | default dict) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "open-webui" $o) hub}}
+  {{hub- $model := (dig "maas" "model" "" $o) hub}}
+  {{hub- if $model hub}}
+  {{hub- $maasNs := (dig "maasNamespace" "models-as-a-service" $m) hub}}
+  {{hub- $entry := dict hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $model hub}}{{hub- $entry = $x hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $entry hub}}{{hub fail (printf "open-webui: config.openWebui.maas.model %s is not a model in config.openshiftAiModels.models" $model) hub}}{{hub- end hub}}
+  {{hub- $granted := list "system:authenticated" "system:serviceaccounts" (printf "system:serviceaccounts:%s" $ns) hub}}
+  {{hub- $ok := false hub}}
+  {{hub- range $g := (dig "accessGroups" (list "system:authenticated") $entry) hub}}
+  {{hub- if has $g $granted hub}}{{hub- $ok = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $ok hub}}{{hub fail (printf "open-webui: model %s does not grant system:serviceaccounts:%s in its accessGroups, so Open WebUI cannot mint a key; add that group" $model $ns) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaaSSubscription
+      metadata:
+        name: '{{hub $model hub}}-default'
+        namespace: '{{hub $maasNs hub}}'
+  {{hub- else hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: '{{hub $ns hub}}'
+  {{hub- end hub}}

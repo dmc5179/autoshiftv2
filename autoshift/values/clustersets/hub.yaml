@@ -20,6 +20,10 @@ hubClusterSets:
       openWebui:
         auth: 'openshift'
         adminEmail: 'danclark@cluster.local'
+        # A direct connection to the model next to Hermes. All Open WebUI users share
+        # one key, so they share its owner's tokenRateLimit.
+        maas:
+          model: 'granite-4-tiny-gpu'
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         secretName: 'maas-api-key'
@@ -81,9 +85,12 @@ hubClusterSets:
             #       CronJob mints the key the OpenShell rhoai-maas provider holds.
             #       Sandbox workloads get no ServiceAccount token, so this does not
             #       let a sandbox mint keys of its own.
+            #   system:serviceaccounts:open-webui  Open WebUI mints the one key
+            #       its MaaS connection shares among all its users (openWebui.maas).
             accessGroups:
               - 'system:serviceaccounts:hermes'
               - 'system:serviceaccounts:openshell'
+              - 'system:serviceaccounts:open-webui'
               - 'maas-users'
             # servedModelName defaults to name. Overriding it so the two
             # disagree returns 404 "the model X does not exist" at inference

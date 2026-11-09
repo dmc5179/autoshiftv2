@@ -1,0 +1,42 @@
+# Is Open WebUI's Models-as-a-Service key valid, and is it renewing itself?
+#
+# inform-only. The key is minted by the pod and kept in the open-webui-maas-key Secret, whose
+# annotations record when it expires. The container restarts at the start of the renewal window
+# to mint the replacement; this check reports when that has not happened:
+#   - no Secret: the pod has never minted a key, so Open WebUI runs with Hermes only. Its
+#     [bootstrap] log says why, usually a 403 from maas-api (see policy-open-webui-maas-access);
+#   - expired: the MaaS connection fails for every user;
+#   - renewal more than two hours overdue: the restart did not renew it.
+#
+# A clock-based condition never fires an event, so policy-generator-config.yaml gives this
+# policy a fixed evaluation interval. Without maas configured it only asserts the namespace.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $o := (index $cfg "openWebui" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "open-webui" $o) hub}}
+  {{hub- if (dig "maas" "model" "" $o) hub}}
+  {{hub- $renew := (dig "maas" "renewBefore" "168h" $o) hub}}
+  {{hub- if not (regexMatch "^[1-9][0-9]*h$" $renew) hub}}{{hub fail (printf "open-webui: config.openWebui.maas.renewBefore %s must be a whole number of hours, for example 168h" $renew) hub}}{{hub- end hub}}
+  {{- $key := (lookup "v1" "Secret" "{{hub $ns hub}}" "open-webui-maas-key") | default dict }}
+  {{- if (dig "metadata" "name" "" $key) }}
+  {{- $expires := atoi (dig "metadata" "annotations" "open-webui.autoshift.io/expires-at" "0" $key) }}
+  {{- $renewAt := sub $expires (mul {{hub (atoi (trimSuffix "h" $renew)) hub}} 3600) }}
+  {{- if lt $expires (now).Unix }}{{ fail (printf "open-webui: the MaaS key in {{hub $ns hub}}/open-webui-maas-key expired at %s; the MaaS connection fails for every user. Check the open-webui pod's [bootstrap] log" (date "2006-01-02T15:04Z" $expires)) }}{{- end }}
+  {{- if lt (add $renewAt 7200) (now).Unix }}{{ fail (printf "open-webui: the MaaS key in {{hub $ns hub}}/open-webui-maas-key was due for renewal at %s and has not been renewed; it expires at %s. Check the open-webui pod's [bootstrap] log" (date "2006-01-02T15:04Z" $renewAt) (date "2006-01-02T15:04Z" $expires)) }}{{- end }}
+  {{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: open-webui-maas-key
+        namespace: '{{hub $ns hub}}'
+  {{hub- else hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: '{{hub $ns hub}}'
+  {{hub- end hub}}
