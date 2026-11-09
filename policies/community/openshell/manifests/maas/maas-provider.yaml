@@ -1,11 +1,17 @@
 # Gives sandboxes governed access to a Models-as-a-Service model: an imported provider profile that
 # binds a MaaS API key to the MaaS gateway, and a provider instance holding that key.
 #
-# How a sandbox uses it. OpenShell 0.1.6 has no inference router: a sandbox started with
-# `--provider rhoai-maas` calls the MaaS gateway directly, with OPENAI_BASE_URL set and an opaque
-# placeholder in OPENAI_API_KEY. The sandbox proxy swaps the placeholder for the real key only on
-# requests to the host, port and path the profile names, from a binary the profile lists. The key
-# never enters the sandbox and cannot be sent anywhere else.
+# How a sandbox uses it. OpenShell 0.1.6 has no inference router. A sandbox started with
+#   openshell sandbox create --template rhoai-maas --provider rhoai-maas ...
+# calls the MaaS gateway directly: the provider puts an opaque placeholder in OPENAI_API_KEY, and the
+# rhoai-maas sandbox template sets OPENAI_BASE_URL. The sandbox proxy swaps the placeholder for the
+# real key only on requests to the host, port and path the profile names, from a binary the profile
+# lists. The key never enters the sandbox and cannot be sent anywhere else.
+#
+# Why a template for the URL. A provider's config keys do not reach the sandbox environment in
+# OpenShell 0.1.6 to 0.1.7: only the built-in google-cloud and google-vertex-ai profiles have a
+# projector for them, and a custom profile has none. Only credentials become environment variables.
+# A sandbox template can carry a non-secret --env, and the provider still supplies the key.
 #
 # Why a CronJob. Provider profiles and providers are gateway state, stored in the gateway database,
 # not Kubernetes objects, so a policy cannot declare them. The CronJob reconciles them with the
@@ -220,6 +226,23 @@ object-templates-raw: |
               log "imported provider profile rhoai-maas"
           fi
 
+          # --- the sandbox template that carries OPENAI_BASE_URL ------------------------
+          # Provider config keys are not projected into sandboxes for custom profiles, so the
+          # base URL travels in a template. There is no template update: on a configuration change
+          # the template is deleted and created again, which does not touch running sandboxes.
+          if openshell sandbox template get rhoai-maas >/dev/null 2>&1; then
+              if [[ "${have_hash}" != "${want_hash}" ]]; then
+                  openshell sandbox template delete rhoai-maas >/dev/null
+                  openshell sandbox template create rhoai-maas --env "OPENAI_BASE_URL=${MAAS_BASE_URL}" \
+                      --label app.kubernetes.io/managed-by=autoshift-openshell >/dev/null
+                  log "re-created sandbox template rhoai-maas"
+              fi
+          else
+              openshell sandbox template create rhoai-maas --env "OPENAI_BASE_URL=${MAAS_BASE_URL}" \
+                  --label app.kubernetes.io/managed-by=autoshift-openshell >/dev/null
+              log "created sandbox template rhoai-maas"
+          fi
+
           # --- the provider and its key --------------------------------------------------
           now="$(date -u +%s)"
           renew_at=$(( expires_at - $(hours_to_seconds "${MAAS_RENEW_BEFORE}") ))
@@ -260,6 +283,9 @@ object-templates-raw: |
           fi
           export OPENAI_API_KEY
           expires_at=$(( now + $(hours_to_seconds "${MAAS_KEY_TTL}") ))
+          # OPENAI_BASE_URL in the provider config is not injected into sandboxes (see the
+          # template above). It stays here because the gateway checks it against the profile's
+          # endpoints: a base URL outside them would make the profile endpointless.
           if [[ "${provider_exists}" == true ]]; then
               openshell provider update rhoai-maas --credential OPENAI_API_KEY \
                   --config "OPENAI_BASE_URL=${MAAS_BASE_URL}" >/dev/null

@@ -20,7 +20,7 @@ NVIDIA's upstream Helm chart on the Red Hat product-built images
 | `policy-openshell-namespace` | enforce | Namespaces `openshell` (gateway and sandboxes) and `openshell-credentials` (provider credentials), and a copy of the cluster ingress signer for sandboxes to trust |
 | `policy-openshell-gateway` | enforce | The rendered chart: gateway StatefulSet, Services, passthrough Route, cert-manager Issuers and Certificates, the certgen Job, RBAC, NetworkPolicy |
 | `policy-openshell-gateway-ready` | inform | The server Certificate is Ready, the certgen Job succeeded, and the gateway StatefulSet has a ready replica |
-| `policy-openshell-maas-provider` | enforce | Opt-in. The `rhoai-maas` provider profile, and a CronJob that creates the `rhoai-maas` provider and keeps its Models-as-a-Service key renewed |
+| `policy-openshell-maas-provider` | enforce | Opt-in. The `rhoai-maas` provider profile, and a CronJob that creates the `rhoai-maas` provider and sandbox template and keeps the Models-as-a-Service key renewed |
 | `policy-openshell-maas-provider-ready` | inform | Opt-in. The CronJob has completed at least one reconcile |
 
 Each policy waits for the one before it. The barrier also depends on
@@ -136,12 +136,16 @@ sandbox proxy substitutes the real credential only on requests that a provider p
   Models-as-a-Service gateway host, port 443, under `/v1`, and lists the executables allowed to use
   it. A request anywhere else that carries the placeholder gets HTTP 403
   `credential_endpoint_mismatch`.
-- **The `rhoai-maas` provider**, holding a Models-as-a-Service key and `OPENAI_BASE_URL`. The
+- **The `rhoai-maas` provider**, holding a Models-as-a-Service key. The
   CronJob mints the key with its ServiceAccount token against the `<model>-default` subscription, the
   same way the hermes-agent policy mints its key. It mints a new key when the provider is missing,
   when the key is inside its renewal window, or when the profile, gateway URL, subscription or
   lifetime changed. Running sandboxes pick up a renewed key. Replaced keys are not revoked; each
   expires at the end of its own lifetime.
+- **The `rhoai-maas` sandbox template**, which sets `OPENAI_BASE_URL` to the gateway's `/v1` URL. A
+  provider's configuration values do not reach the sandbox environment in OpenShell 0.1.6: only
+  credentials do, and only the built-in Google profiles project configuration. A template can carry
+  a non-secret environment variable, so the URL travels there and the key stays with the provider.
 
 Requirements:
 
@@ -154,13 +158,14 @@ Requirements:
 - The gateway must not have OpenID Connect enabled. The CronJob signs in with the mutual TLS client
   bundle, which makes it a platform administrator only while OpenID Connect is off.
 
-A sandbox uses the model by attaching the provider. Inside it, `OPENAI_BASE_URL` points at the
-gateway and `OPENAI_API_KEY` holds the placeholder, so the OpenAI SDK works unchanged. The request
+A sandbox uses the model when it is created from the template with the provider attached. Inside
+it, `OPENAI_BASE_URL` points at the gateway and `OPENAI_API_KEY` holds the placeholder, so the
+OpenAI SDK works unchanged. Attaching the provider alone gives the key but not the URL. The request
 model ID is `publishers/<openshiftAiModels.namespace>/models/<model>`. Single quotes keep the
 variables from expanding on your own machine:
 
 ```shell
-openshell sandbox create --name agent --provider rhoai-maas -- sleep 600
+openshell sandbox create --name agent --template rhoai-maas --provider rhoai-maas -- sleep 600
 openshell sandbox exec --name agent -- \
   sh -c 'curl -sS "$OPENAI_BASE_URL/models" -H "Authorization: Bearer $OPENAI_API_KEY"'
 ```
