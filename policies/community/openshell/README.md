@@ -71,15 +71,15 @@ Set labels in values files only. The `cluster-labels` policy stamps them onto ea
 - Red Hat Enterprise Linux CoreOS worker nodes.
 - A CNI that enforces ingress and egress NetworkPolicy, such as OVN-Kubernetes. OpenShell creates the
   policies but cannot verify that they are enforced.
-- The hub's Red Hat OpenShift GitOps repository server must reach `ghcr.io` to pull the chart, and the
-  managed cluster must reach `quay.io` and `registry.access.redhat.com` for images. For a
-  disconnected cluster, mirror both and point `repo:` and the image registry at the mirror.
+- The managed cluster must reach `quay.io` and `registry.access.redhat.com` for images, or a mirror
+  of them. The hub needs no network access for the chart, which is vendored in `vendor/helm-chart`.
 
 ## Versions
 
-The chart version is pinned in `manifests/chart/kustomization.yaml` and applies to every cluster,
-because the hub renders the chart once. The image tag is per cluster. Each Red Hat build is made from
-one upstream release, so move the two together: `v0.1.6-rhaiv.N` belongs with chart `0.1.6`.
+The chart is vendored in `vendor/helm-chart` (NVIDIA's chart 0.1.6, Apache-2.0) and applies to every
+cluster, because the hub renders it once. The image tag is per cluster. Each Red Hat build is made
+from one upstream release, so move the two together: `v0.1.6-rhaiv.N` belongs with chart `0.1.6`.
+[vendor/README.md](vendor/README.md) records the chart's source and digests and how to update it.
 
 ## How the chart is rendered, and what that changes
 

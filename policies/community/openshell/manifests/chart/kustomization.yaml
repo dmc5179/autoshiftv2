@@ -10,10 +10,13 @@ kind: Kustomization
 #
 # OpenShell is a Developer Preview in Red Hat OpenShift AI 3.5 and is not supported for production.
 #
-# The chart version is a REPOSITORY pin: kustomize resolves it when the hub renders the policy, so it
-# cannot vary per cluster. The image tag can, through autoshift.io/openshell-version. Each Red Hat
-# build is made from one upstream release, so move the two together: v0.1.6-rhaiv.N goes with chart
-# 0.1.6. A tag from another release can fail at runtime against this chart's gateway.toml.
+# The chart is VENDORED in ../../vendor/helm-chart (NVIDIA's helm-chart 0.1.6, Apache-2.0), so the
+# hub renders this policy with no network access, which a disconnected hub needs: Helm ignores the
+# cluster's ImageDigestMirrorSet and ImageTagMirrorSet. Provenance, digests and the update procedure
+# are in ../../vendor/README.md. The chart is therefore a REPOSITORY pin and cannot vary per cluster;
+# the image tag can, through autoshift.io/openshell-version. Each Red Hat build is made from one
+# upstream release, so move the two together: v0.1.6-rhaiv.N goes with chart 0.1.6. A tag from
+# another release can fail at runtime against this chart's gateway.toml.
 #
 # Rendering offline changes four things about the chart, and every values entry or patch below that
 # exists for one of them says so:
@@ -23,9 +26,14 @@ kind: Kustomization
 #      render. The credential key-encryption key is the dangerous one, see server.credentialDrivers.
 #   3. Helm hooks become ordinary objects that a ConfigurationPolicy owns, see the certgen patches.
 #   4. Objects the chart leaves namespace-less, relying on helm -n, need a namespace stamped on.
+# A local chart: kustomize renders <chartHome>/<name>, a directory. It cannot render a .tgz, and with
+# no repo: it never pulls. The same pattern as components/operator-install.
+helmGlobals:
+  chartHome: ../../vendor/
 helmCharts:
   - name: helm-chart
-    repo: oci://ghcr.io/nvidia/openshell
+    # For readers only. kustomize does not check it against a local chart; the version that renders
+    # is the one in ../../vendor/helm-chart/Chart.yaml.
     version: 0.1.6
     releaseName: openshell
     namespace: openshell
