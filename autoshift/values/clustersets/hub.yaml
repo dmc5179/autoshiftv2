@@ -277,49 +277,15 @@ hubClusterSets:
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
       #
-      # hermes-agent is an agent framework consuming this cluster's MaaS. Its
-      # manifests live in its own repo and are NOT vendored here - that is the
-      # point of the pointer policy.
-      #
-      # These coordinates reproduce the Application that was applied by hand
-      # before this policy existed. Same name and namespace, so enabling the
-      # policy ADOPTS that Application rather than creating a second one.
+      # Empty for now. Hermes was the only entry, pointing at the
+      # hand-written overlay for the old sandbox3587 cluster
+      # (dmc5179/hermes-openshift, branch maas-gitops,
+      # gitops/overlays/rhoai-sandbox3587). Hermes is now the native
+      # hermes-agent policy, so that entry is gone. The mechanism stays for
+      # a future workload that lives in its own repo.
       gitopsWorkloads:
         gitopsNamespace: openshift-gitops
-        workloads:
-          - name: hermes-agent
-            repoUrl: https://github.com/dmc5179/hermes-openshift
-            # NOT main - main has no gitops/ tree and the sync fails with
-            # "app path does not exist".
-            targetRevision: maas-gitops
-            path: gitops/overlays/rhoai-sandbox3587
-            destinationNamespace: hermes
-            # false on purpose: the overlay carries its own Namespace manifest,
-            # so CreateNamespace=true would make Argo and the overlay two
-            # writers for one object.
-            createNamespace: false
-            prune: true
-            selfHeal: true
-            project: default
-            syncOptions:
-              - ApplyOutOfSyncOnly=true
-            retry:
-              limit: 5
-              backoff:
-                duration: 15s
-                factor: 2
-                maxDuration: 5m
-            ignoreDifferences:
-              # Minted out of band; Argo must not fight whoever wrote it.
-              - kind: Secret
-                name: hermes-maas-credentials
-                jsonPointers:
-                  - /data
-              - kind: PersistentVolumeClaim
-                name: hermes-data
-                jsonPointers:
-                  - /spec/volumeName
-                  - /spec/resources/requests/storage
+        workloads: []
     labels:
       # =====================================================================
       # Profile: minimal RHOAI Models-as-a-Service hub
@@ -445,9 +411,8 @@ hubClusterSets:
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
       # Application of the same name rather than creating a second one.
-      # 'false' for now: the only Hermes overlay hardcodes the old sandbox3587
-      # cluster (MaaS URL, ingress CA, Route host), and Hermes needs an
-      # out-of-band Secret. Re-enable once Hermes has a cluster-agnostic overlay.
+      # 'false': config.gitopsWorkloads has no workloads. Hermes, the only one
+      # it ever carried, is deployed by the hermes-agent policy instead.
       gitops-workloads: 'false'
       # HTPasswd identity provider + the maas-users group. Reads
       # config.htpasswdUsers above.
