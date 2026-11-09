@@ -1,0 +1,205 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# SHARED BASE, not a policy manifest. PolicyGenerator renders it twice, through ../gateway and
+# ../statefulset, which split its output so the gateway StatefulSet can be enforced with
+# mustonlyhave while everything else stays musthave. See ../statefulset/kustomization.yaml.
+#
+# The OpenShell gateway from NVIDIA's upstream Helm chart, run on the Red Hat product-built images
+# (quay.io/opendatahub/odh-openshell-*, built in Konflux). Rendered offline by kustomize and wrapped
+# into a Policy by PolicyGenerator, the same way the vault policy wraps its chart.
+#
+# OpenShell is a Developer Preview in Red Hat OpenShift AI 3.5 and is not supported for production.
+#
+# The chart version is a REPOSITORY pin: kustomize resolves it when the hub renders the policy, so it
+# cannot vary per cluster. The image tag can, through autoshift.io/openshell-version. Each Red Hat
+# build is made from one upstream release, so move the two together: v0.1.6-rhaiv.N goes with chart
+# 0.1.6. A tag from another release can fail at runtime against this chart's gateway.toml.
+#
+# Rendering offline changes four things about the chart, and every values entry or patch below that
+# exists for one of them says so:
+#   1. No live API discovery, so the Agent Sandbox preflight is off. policy-openshell-prereqs
+#      replaces it.
+#   2. No Helm lookup, so anything the chart keeps stable through lookup is regenerated on every
+#      render. The credential key-encryption key is the dangerous one, see server.credentialDrivers.
+#   3. Helm hooks become ordinary objects that a ConfigurationPolicy owns, see the certgen patches.
+#   4. Objects the chart leaves namespace-less, relying on helm -n, need a namespace stamped on.
+helmCharts:
+  - name: helm-chart
+    repo: oci://ghcr.io/nvidia/openshell
+    version: 0.1.6
+    releaseName: openshell
+    namespace: openshell
+    valuesInline:
+      global:
+        image:
+          registry: quay.io/opendatahub
+          # Backquoted strings, not double quotes, inside this template: the chart writes the tag
+          # into gateway.toml (supervisor_image, sandbox_runtime_image) with TOML escaping, which
+          # turns every " into \" and leaves a template the hub cannot parse.
+          tag: '{{hub index .ManagedClusterLabels `autoshift.io/openshell-version` | default `v0.1.6-rhaiv.4` hub}}'
+      gateway:
+        image:
+          repository: odh-openshell-gateway
+      supervisor:
+        image:
+          repository: odh-openshell-supervisor
+      sandboxRuntime:
+        image:
+          repository: odh-openshell-sandbox
+      # restricted-v2 must assign the UID and fsGroup from the namespace range, so the chart's fixed
+      # runAsUser: 1000 and fsGroup: 1000 have to go. Upstream does that with null values
+      # (ci/values-openshift-scc.yaml), which works with `helm -f` but NOT here: kustomize drops
+      # null keys when it writes valuesInline out for helm, so helm keeps the chart defaults and the
+      # pod is rejected at admission. The two fields are removed by the patch on StatefulSet/openshell
+      # below instead. Do not reintroduce the nulls; they do nothing.
+      # (1) Offline render cannot discover APIs.
+      agentSandbox:
+        preflight:
+          enabled: false
+      # TLS from cert-manager (the cert-manager policy), not the chart's self-generated PKI. The
+      # chart still renders its certgen Job, in JWT-only mode, for the sandbox JWT signing key that
+      # cert-manager does not manage.
+      certManager:
+        enabled: true
+      # Passthrough Route: the gateway terminates TLS and mTLS itself. Host patched below.
+      openshiftRoute:
+        enabled: true
+      # The image a sandbox runs when `openshell sandbox create` names none. The chart default is
+      # nvcr.io/nvidia/base/ubuntu:24.04, which is outside any Red Hat support path and is NOT
+      # redirected by global.image.registry (its repository is a full path). ubi-minimal has the
+      # shell the runtime needs and is in the OpenShift AI additional images, so a disconnected
+      # mirror already carries it. Real agents pass their own image with --from.
+      sandbox:
+        image:
+          repository: registry.access.redhat.com/ubi9/ubi-minimal
+          tag: '9.8'
+      # Trust the cluster ingress signer for sandbox egress (manifests/namespace/additional-ca.yaml).
+      # Chart 0.1.7 derives exactly this from supervisor.network.additionalCaConfigMapName; chart
+      # 0.1.6 has no such value, but the v0.1.6-rhaiv builds already carry the feature (upstream
+      # #3292, merged after the v0.1.6 tag), so it is wired by hand: a TOML table, a mount, and the
+      # ConfigMap rule patched onto the sandbox Role below. Move to the chart value with 0.1.7.
+      gatewayConfig:
+        openshell:
+          version: 2
+        openshell.supervisor.network:
+          additional_ca_bundle: /etc/openshell-tls/additional-ca-source/ca.crt
+      server:
+        # The gateway stages the normalized bundle under its XDG state directory before handing it to
+        # sandboxes. Under restricted-v2 the arbitrary UID has no writable home, so give it the same
+        # dedicated writable volume chart 0.1.7 adds.
+        extraEnv:
+          - name: XDG_STATE_HOME
+            value: /var/lib/openshell-state
+        extraVolumes:
+          - name: gateway-state
+            emptyDir: {}
+          - name: additional-ca-source
+            configMap:
+              name: openshell-additional-ca
+              items:
+                - key: ca-bundle.crt
+                  path: ca.crt
+        extraVolumeMounts:
+          - name: gateway-state
+            mountPath: /var/lib/openshell-state
+          - name: additional-ca-source
+            mountPath: /etc/openshell-tls/additional-ca-source/ca.crt
+            subPath: ca.crt
+            readOnly: true
+        auth:
+          # Never true here. With it on, every API request is treated as a trusted local developer.
+          # Until OIDC is configured, the CLI signs in with the mTLS client bundle in the
+          # openshell-client-tls Secret.
+          allowUnauthenticatedUsers: false
+        # (2) The default credential storage encrypts provider credentials in the gateway database
+        # with a key-encryption key the chart generates with randBytes and keeps stable only through
+        # a Helm lookup. Rendered offline, that key would be new on every render and the policy would
+        # overwrite it, and every stored provider credential would become undecryptable. The
+        # Kubernetes Secrets driver stores provider credentials as Secrets instead and needs no key.
+        credentialDrivers:
+          kubernetesSecrets:
+            enabled: true
+            namespace: openshell-credentials
+patches:
+  # restricted-v2 assigns the UID and fsGroup (see the note in valuesInline). Without this the pod is
+  # forbidden: "fsGroup: Invalid value: [1000]" and "runAsUser: Invalid value: 1000: must be in the
+  # ranges". The certgen Job sets neither field and needs nothing. The ops fail the render if the
+  # chart stops setting either field, which is the signal to drop them.
+  - target:
+      kind: StatefulSet
+      name: openshell
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/securityContext/fsGroup
+      - op: remove
+        path: /spec/template/spec/containers/0/securityContext/runAsUser
+  # (4) Namespace-less in the chart output.
+  - target:
+      kind: ServiceAccount|ConfigMap|Service|StatefulSet
+      name: ^openshell(-config|-peer)?$
+    patch: |-
+      - op: add
+        path: /metadata/namespace
+        value: openshell
+  # Route host and the matching server-certificate SAN. Resolved ON THE MANAGED CLUSTER, from the
+  # cluster Ingress config (status-backed and always populated; the IngressController's spec.domain is
+  # often empty, see openshift-ai-maas/manifests/gateway.yaml). The CLI rejects the connection unless
+  # the Route host is a SAN on the server certificate, because the Route is passthrough.
+  - target:
+      kind: Route
+      name: openshell
+    patch: |-
+      - op: replace
+        path: /spec/host
+        value: '{{ printf "openshell-openshell.%s" (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}'
+  - target:
+      kind: Certificate
+      name: openshell-server
+    patch: |-
+      - op: add
+        path: /spec/dnsNames/-
+        value: '{{ printf "openshell-openshell.%s" (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}'
+  # (3) The certgen Job is a pre-install hook that deletes itself on success and carries a 300s TTL.
+  # Owned by a policy, it would be deleted and recreated every few minutes, so the TTL goes. Its pod
+  # template is immutable, so the image tag goes into its name: an upgrade creates a new Job rather
+  # than leaving the policy NonCompliant on an unpatchable field. Generating the JWT keys is
+  # idempotent, so a new Job leaves the existing signing key alone.
+  - target:
+      kind: Job
+      name: openshell-certgen
+    patch: |-
+      - op: remove
+        path: /spec/ttlSecondsAfterFinished
+      - op: replace
+        path: /metadata/name
+        value: 'openshell-certgen-{{hub index .ManagedClusterLabels `autoshift.io/openshell-version` | default `v0.1.6-rhaiv.4` hub}}'
+  # The driver stages the additional CA as immutable, content-addressed ConfigMaps in the sandbox
+  # namespace and verifies them by exact name, so it needs get and create there (and deliberately
+  # nothing else). Chart 0.1.7 adds this rule when its additional-CA value is set.
+  - target:
+      kind: Role
+      name: openshell-sandbox
+    patch: |-
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups:
+            - ''
+          resources:
+            - configmaps
+          verbs:
+            - get
+            - create
+  # Marks the gateway StatefulSet so ../gateway and ../statefulset can split the render. The marker
+  # is matched by an annotation selector rather than by kind, so an object kind a future chart adds
+  # lands in ../gateway (musthave) and never in both halves.
+  - target:
+      kind: StatefulSet
+      name: openshell
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: openshell
+        annotations:
+          autoshift-openshell/manifest: statefulset

@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The gateway StatefulSet alone, enforced mustonlyhave (policy-generator-config.yaml).
+#
+# Why. musthave merges into lists and never replaces an entry, so a changed image tag, env var or
+# volume on the gateway container would be merged in beside the old one, or not applied at all, while
+# the policy still reported Compliant (docs/policy-behavior.md). mustonlyhave makes the live
+# StatefulSet match the template, so an openshell-version bump rolls the gateway like any other
+# change. hermes-agent enforces its Deployment the same way.
+#
+# Server-filled fields. The API server fills defaults into a StatefulSet that the chart does not
+# write. Red Hat Advanced Cluster Management 2.17 tolerates defaulted fields under mustonlyhave
+# (hermes-agent's Deployment is Compliant at a stable generation with defaults the template omits),
+# but a StatefulSet adds one hazard a Deployment does not: volumeClaimTemplates is IMMUTABLE. Were a
+# defaulted field there ever treated as drift, the update would be rejected and the policy would stay
+# NonCompliant forever. So every field the API server fills is written here with the exact value it
+# stores, read from the live object on OpenShift 4.22: comparing this template with the live
+# StatefulSet then finds nothing to change, however the comparison treats defaults.
+resources:
+  - ../chart
+patches:
+  - target:
+      annotationSelector: '!autoshift-openshell/manifest'
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: selected-by-target
+  - target:
+      kind: StatefulSet
+      name: openshell
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: openshell
+      spec:
+        podManagementPolicy: OrderedReady
+        revisionHistoryLimit: 10
+        updateStrategy:
+          type: RollingUpdate
+          rollingUpdate:
+            partition: 0
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Retain
+          whenScaled: Retain
+  # The claim template, with the four fields the API server adds. A JSON patch, because a strategic
+  # merge on volumeClaimTemplates would replace the list rather than merge into its only entry.
+  - target:
+      kind: StatefulSet
+      name: openshell
+    patch: |-
+      - op: add
+        path: /spec/volumeClaimTemplates/0/apiVersion
+        value: v1
+      - op: add
+        path: /spec/volumeClaimTemplates/0/kind
+        value: PersistentVolumeClaim
+      - op: add
+        path: /spec/volumeClaimTemplates/0/spec/volumeMode
+        value: Filesystem
+      - op: add
+        path: /spec/volumeClaimTemplates/0/status
+        value:
+          phase: Pending

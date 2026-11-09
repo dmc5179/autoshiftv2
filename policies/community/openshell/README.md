@@ -77,7 +77,7 @@ Set labels in values files only. The `cluster-labels` policy stamps them onto ea
 
 ## Versions
 
-The chart version is pinned in `manifests/gateway/kustomization.yaml` and applies to every cluster,
+The chart version is pinned in `manifests/chart/kustomization.yaml` and applies to every cluster,
 because the hub renders the chart once. The image tag is per cluster. Each Red Hat build is made from
 one upstream release, so move the two together: `v0.1.6-rhaiv.N` belongs with chart `0.1.6`.
 
@@ -93,7 +93,26 @@ renders its chart. Four chart behaviors depend on a live `helm install`, and the
 | The certgen Job is a hook with a 300-second TTL that deletes itself | The policy would re-create it every few minutes | The TTL is removed |
 | The certgen Job pod template is immutable | An image upgrade would leave the policy NonCompliant | The image tag is part of the Job name, so an upgrade creates a new Job. The key generation is idempotent |
 
-The chart also leaves five objects without `metadata.namespace`, which a patch sets.
+The chart also leaves five objects without `metadata.namespace`, which a patch sets, and it fixes
+the gateway's user and group ID at 1000, which `restricted-v2` rejects. The chart's documented
+override sets them to `null`, but kustomize drops `null` values before Helm sees them, so a patch
+removes both fields from the rendered StatefulSet instead.
+
+### Two compliance types in one policy
+
+`policy-openshell-gateway` renders the chart once in `manifests/chart/` and splits the output in two:
+
+| Part | Compliance type | Why |
+|---|---|---|
+| `manifests/statefulset/`: the gateway StatefulSet | `mustonlyhave` | `musthave` merges into lists and never replaces an entry, so a new image tag or env value would not reach the gateway container. With `mustonlyhave`, changing `openshell-version` rolls the gateway |
+| `manifests/gateway/`: everything else | `musthave` | Controllers add to some of these objects after creation. The certgen Job, for example, gets controller labels and has an immutable pod template, so `mustonlyhave` would leave it NonCompliant |
+
+A StatefulSet's `volumeClaimTemplates` cannot be changed after creation, so the StatefulSet part
+writes every field the API server fills in there, and the defaulted update strategy and retention
+policy, with the values the server stores. The template then matches the live object, and
+`mustonlyhave` never asks for a change the API server would reject. A marker annotation,
+`autoshift-openshell/manifest: statefulset`, separates the two parts, so an object kind added by a
+future chart goes to the `musthave` part rather than to both.
 
 ## Security choices
 

@@ -52,13 +52,17 @@ policies:
       - name: policy-openshell-prereqs
     manifests:
       - path: manifests/namespace
-  # The upstream chart, rendered offline. See manifests/gateway/kustomization.yaml for what offline
-  # rendering changes and how each change is handled.
+  # The upstream chart, rendered offline. See manifests/chart/kustomization.yaml for what offline
+  # rendering changes and how each change is handled. The render is split in two: the gateway
+  # StatefulSet is mustonlyhave so image and env changes replace the old values instead of merging
+  # beside them; everything else stays musthave. See manifests/statefulset/kustomization.yaml.
   - name: policy-openshell-gateway
     dependencies:
       - name: policy-openshell-namespace
     manifests:
       - path: manifests/gateway
+      - path: manifests/statefulset
+        complianceType: mustonlyhave
   # inform: the gateway is serving, not just created. Not depended on by the gateway policy: it
   # detects, it does not gate, and the effect cannot exist until the gateway policy has run.
   - name: policy-openshell-gateway-ready
