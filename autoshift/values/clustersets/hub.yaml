@@ -18,6 +18,7 @@ hubClusterSets:
       hermesAgent:
         model: 'granite-4-tiny-gpu'
       openWebui:
+        auth: 'openshift'
         adminEmail: 'danclark@cluster.local'
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
