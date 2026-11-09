@@ -103,6 +103,44 @@ overdue. Replaced keys are not revoked; each expires at the end of its own TTL.
 `keyTtl` is capped at `2160h` because Models-as-a-Service in Red Hat OpenShift AI 3.5 rejects keys
 longer than 90 days. The same keys and limits are used by the `openshell` policy.
 
+### Testing renewal
+
+Renewal normally happens weeks after a deployment. To see one now, without changing any values,
+move the recorded expiry forward and restart the pod. The bootstrap trusts the
+`hermes.autoshift.io/expires-at` annotation, and no policy manages the Secret's annotations, so
+the edit is not reverted:
+
+```bash
+ns=hermes
+renew_h=168   # renewBefore
+"$OC" annotate secrets hermes-maas-key -n "$ns" --overwrite \
+    hermes.autoshift.io/expires-at="$(( $(date +%s) + renew_h * 3600 + 420 ))"
+"$OC" delete pods -n "$ns" -l app.kubernetes.io/name=hermes-agent
+```
+
+Only move the expiry earlier: a later value would hide a real expiry from
+`policy-hermes-agent-key`. The real key stays valid for its full lifetime and is replaced
+seven minutes later. Delete the pod rather than run `oc rollout restart`: that edits the pod
+template, the `mustonlyhave` Deployment policy reverts it, and the pod rolls twice.
+
+After about seven minutes, expect:
+
+- Container `hermes` restarts once in the same pod, and its last state shows exit code 124. An
+  exit code of 137 means Hermes ignored `SIGTERM` for 60 seconds and was killed; the key still
+  renews.
+- The `[bootstrap]` log shows `minting a MaaS key: key expires at` the moved date, then
+  `minted MaaS key` with a new expiry `keyTtl` ahead.
+- New `expires-at` and `minted-at` annotations on the Secret, and an unchanged `config-hash`.
+- Two `hermes-agent` keys listed by maas-api for the ServiceAccount, because the replaced key
+  is not revoked.
+- `policy-hermes-agent-key` stays Compliant: the moved expiry is still in the future. While the
+  container is down, `policy-hermes-agent-ready` can report NonCompliant and the key policy,
+  which depends on it, Pending. Both recover once the pod is Available again.
+
+The smallest values the policy accepts, `keyTtl: 2h` and `renewBefore: 1h`, test the same path
+through the hub values, with an hour's wait. Changing either value rolls the pod and mints a key
+at once, because `keyTtl` is part of the key's `config-hash`. Reverting them does the same again.
+
 ## Updating
 
 The Deployment is `mustonlyhave`: with `musthave`, an image or environment change merges into
