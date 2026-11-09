@@ -16,6 +16,14 @@ object-templates-raw: |
     {{- end }}
   {{- end }}
   {{- range $zone := ternary (list $worker_ms.spec.template.spec.providerSpec.value.placement.availabilityZone ) $zones_from_labels (eq 0 (len $zones_from_labels)) }}
+  {{- $msname := printf "%s-%s-%s" $infrastructure_id $machineset_role $zone }}
+  {{- /* Under a MachineAutoscaler the count is the autoscaler's, not the label's: expect the
+         replicas the MachineSet currently asks for. */ -}}
+  {{- $expect := $want }}
+  {{- $live := (lookup "machine.openshift.io/v1beta1" "MachineSet" "openshift-machine-api" $msname) }}
+  {{- if hasKey (dig "metadata" "annotations" dict $live) "autoscaling.openshift.io/machineautoscaler" }}
+  {{- $expect = (dig "spec" "replicas" 0 $live) | toString }}
+  {{- end }}
   - complianceType: musthave
     objectDefinition:
       apiVersion: machine.openshift.io/v1beta1
@@ -26,6 +34,6 @@ object-templates-raw: |
         name: {{ $infrastructure_id }}-{{ $machineset_role }}-{{ $zone }}
         namespace: openshift-machine-api
       status:
-        readyReplicas: {{ $want }}
+        readyReplicas: {{ $expect }}
   {{- end }}
   {{- end }}

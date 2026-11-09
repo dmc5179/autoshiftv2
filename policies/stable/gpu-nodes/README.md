@@ -16,14 +16,33 @@ for it to run on.
 | `autoshift.io/gpu-nodes-region` | no | `us-east-2` | Defaults to the worker's region. |
 | `autoshift.io/gpu-nodes-zone-1` | no | `us-east-2a` | Add `-zone-2`, `-zone-3` for multiple zones. Defaults to the worker's zone. |
 | `autoshift.io/gpu-nodes-spot` | no | `'true'` | Bid up to the on-demand price. See the caveat below. |
+| `autoshift.io/gpu-nodes-accelerator` | no | `nvidia-l4` | The `cluster-api/accelerator` value. Blank derives it from the instance family: `g4dn` `nvidia-t4`, `g5` `nvidia-a10g`, `g6` `nvidia-l4`, `g6e` `nvidia-l40s`, `p4d`/`p4de` `nvidia-a100`, `p5` `nvidia-h100`, `p5e`/`p5en` `nvidia-h200`; any other family is used as is. |
 
 ## What the nodes get
 
 - Label `node-role.kubernetes.io/gpu: ''` plus `node-role.kubernetes.io/worker: ''`
 - Taint `nvidia.com/gpu:NoSchedule`, valueless, so an `operator: Exists` toleration matches
+- Label `cluster-api/accelerator: <type>`, which the cluster autoscaler reads to know what GPU a new
+  node adds. Its value must match a `resourceLimits.gpus[].type` in the `ClusterAutoscaler`.
 
 The taint means only workloads that ask for a GPU land on an expensive instance. The GPU operator's
 own operands tolerate it, so the driver stack still installs.
+
+## With the cluster autoscaler
+
+Once a `MachineAutoscaler` targets a GPU MachineSet, for example from the `cluster-autoscaler`
+policy's `machineSets.gpu`, this policy stops writing `spec.replicas`. The autoscaler owns the count
+from then on, and the two would otherwise overwrite each other. The signal is the
+`autoscaling.openshift.io/machineautoscaler` annotation the autoscaler controller puts on the
+MachineSet, so the switch needs no configuration. `autoshift.io/gpu-nodes` still sets the count
+when the MachineSet is first created and whenever nothing autoscales it.
+
+The readiness test follows the same rule: under a `MachineAutoscaler` it expects the replicas the
+MachineSet currently asks for, not the label's count.
+
+Machines keep the node labels they were created with. A GPU node that existed before this policy
+set `cluster-api/accelerator` has no such label until it is replaced or labeled by hand:
+`oc label node <node> cluster-api/accelerator=<type>`.
 
 ## Two things that are easy to get wrong
 
@@ -58,5 +77,4 @@ Pending with nothing obviously wrong. Both test assertions are skipped when the 
 ## Extension points not implemented
 
 - Root disk size. Inherited from the worker; large models pulled as OCI modelcars may want more.
-- `cluster-api/accelerator` node label, used by the cluster autoscaler to understand GPU capacity.
 - vSphere and bare metal providers.
