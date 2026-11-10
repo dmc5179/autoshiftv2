@@ -20,6 +20,8 @@ Deploying a model behind the gateway is [openshift-ai-models](../openshift-ai-mo
 | `policy-openshift-ai-maas-ready` | inform | The Gateway reports `Programmed=True` |
 | `policy-openshift-ai-maas-db` | inform | The maas-api database Secret exists, and the `maas-api` Deployment is `Available` |
 | `policy-maas-telemetry` | enforce | Opt-in. Turns on MaaS telemetry in `MaasTenantConfig` `default-tenant`, so the Limitador token and request counters carry subscription and model labels. See [Telemetry](#telemetry) |
+| `policy-maas-api-ha` | enforce | Opt-in. Runs `maas-api` with `autoshift.io/openshift-ai-maas-api-replicas` replicas (default 2) and adds a PodDisruptionBudget. See [High availability](#high-availability) |
+| `policy-maas-api-ha-ready` | inform | `maas-api` reports the requested number of available replicas |
 | `policy-maas-telemetry-ready` | inform | The objects telemetry produces exist: the `maas-telemetry` TelemetryPolicy, the `latency-per-subscription` Telemetry, and the Limitador PodMonitor |
 
 ## Enabling
@@ -134,6 +136,22 @@ user names into metrics and add one series per user and model.
 A policy cannot run a Prometheus query, so `policy-maas-telemetry-ready` only shows that the
 objects exist. To confirm the counters carry the new labels, query the platform Prometheus for
 `count by (subscription) (authorized_hits)` after some MaaS traffic.
+
+## High availability
+
+Label `autoshift.io/openshift-ai-maas-ha: 'true'` runs `maas-api` with more than one replica, so
+a node drain (a MachineConfig rollout, an upgrade, a cluster autoscaler scale-down) does not stop
+API key issuance and model listing.
+
+maas-controller renders the `maas-api` Deployment and resets a direct `oc scale` or an HPA within
+minutes. From RHOAI 3.5 the supported way is the `maas.opendatahub.io/maas-api-replicas`
+annotation on `MaasTenantConfig` `default-tenant`, which the controller reads when it renders the
+Deployment (Red Hat solution 7147427). The policy sets only that annotation, plus a
+PodDisruptionBudget with `minAvailable: 1`. The count must be 2 or more, because a budget over a
+single pod blocks every drain.
+
+This covers `maas-api` only. Authorino and Limitador are in the `connectivity-link` directory
+(`policy-rhcl-ha`).
 
 ## Dependencies
 

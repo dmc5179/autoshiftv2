@@ -1,0 +1,24 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-openshift-ai-maas-ha
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # maas-api high availability is opt-in on top of MaaS itself.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/openshift-ai-maas'
+              operator: In
+              values:
+                - 'true'
+            - key: 'autoshift.io/openshift-ai-maas-ha'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

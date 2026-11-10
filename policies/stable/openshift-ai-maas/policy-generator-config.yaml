@@ -112,3 +112,31 @@ policies:
             call it Tenant; on 3.5.2 it is MaasTenantConfig), then whether
             maas-controller created TelemetryPolicy maas-telemetry:
             oc get telemetrypolicies.extensions.kuadrant.io -n openshift-ingress
+  # maas-api high availability, opt-in (autoshift.io/openshift-ai-maas-ha). Depends on -db for the
+  # same reason as telemetry: default-tenant exists only once maas-api is up.
+  - name: policy-maas-api-ha
+    placement:
+      placementPath: placement-openshift-ai-maas-ha.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-maas-db
+    manifests:
+      - path: manifests/ha
+  # inform: maas-api runs the requested number of replicas.
+  - name: policy-maas-api-ha-ready
+    remediationAction: inform
+    consolidateManifests: false
+    placement:
+      placementPath: placement-openshift-ai-maas-ha.yaml
+    dependencies:
+      - name: policy-maas-api-ha
+    manifests:
+      - path: test/maas-api-ha-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ maas-api is not running the requested number of replicas. The
+            count is set by the maas.opendatahub.io/maas-api-replicas
+            annotation on MaasTenantConfig default-tenant in
+            models-as-a-service, which maas-controller reads from RHOAI 3.5.
+            Check the annotation, then the maas-controller log.
+

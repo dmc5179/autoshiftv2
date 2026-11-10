@@ -1,0 +1,36 @@
+# maas-api with more than one replica, and a PodDisruptionBudget so a node drain (a MachineConfig
+# rollout, an upgrade, a cluster autoscaler scale-down) never takes the last one away.
+#
+# maas-controller renders the maas-api Deployment and resets a direct `oc scale` or an HPA within
+# minutes. From RHOAI 3.5 the supported way is the maas.opendatahub.io/maas-api-replicas annotation
+# on the MaasTenantConfig, which the controller reads when it renders the Deployment (Red Hat
+# solution 7147427). This sets only that annotation; policy-maas-telemetry sets spec.telemetry on
+# the same object, and musthave merges the two without either owning the other's fields.
+#
+# The count comes from autoshift.io/openshift-ai-maas-api-replicas (default 2). Fewer than 2 is
+# refused: a PodDisruptionBudget with minAvailable 1 over a single pod blocks every drain.
+object-templates-raw: |
+  {{hub- $replicas := (index .ManagedClusterLabels "autoshift.io/openshift-ai-maas-api-replicas" | default "2") hub}}
+  {{hub- if not (regexMatch "^([2-9]|[1-9][0-9]+)$" $replicas) hub}}{{hub fail (printf "openshift-ai-maas-ha: autoshift.io/openshift-ai-maas-api-replicas %s must be a whole number of 2 or more; a disruption budget over a single replica blocks every node drain" $replicas) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaasTenantConfig
+      metadata:
+        name: default-tenant
+        namespace: models-as-a-service
+        annotations:
+          maas.opendatahub.io/maas-api-replicas: '{{hub $replicas hub}}'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: maas-api
+        namespace: redhat-ai-gateway-infra
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: maas-api
+            app.kubernetes.io/component: api
