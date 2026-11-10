@@ -12,6 +12,7 @@ MCP and Agents catalogs in the AI hub.
 | `policy-openshift-ai-dsc` | enforce | `DSCInitialization` `default-dsci` and `DataScienceCluster` `default-dsc`. Waits for the Operator |
 | `policy-openshift-ai-ready` | inform | The `DataScienceCluster` reports `Ready` |
 | `policy-openshift-ai-mcp-catalog` | enforce | The `mcplifecycleoperator` component and the dashboard `mcpCatalog` flag. Opt-in |
+| `policy-openshift-ai-genai-studio` | enforce | The dashboard `genAiStudio` flag: Gen AI studio AI asset endpoints and Playground (Technology Preview). Opt-in |
 | `policy-openshift-ai-agents-cat` | enforce | The dashboard `agentsCatalog` flag. Opt-in |
 
 ## Enabling
@@ -28,6 +29,7 @@ hubClusterSets:
       # openshift-ai-version: 'rhods-operator.3.5.2'   # optional CSV pin
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
+      openshift-ai-genai-studio: 'false'
 ```
 
 | Label | Meaning |
@@ -35,6 +37,7 @@ hubClusterSets:
 | `openshift-ai` and the standard operator labels | Install the Operator and create the platform |
 | `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP Gateway, which Red Hat Connectivity Link 1.5 includes |
 | `openshift-ai-agents-catalog` | Enable the Agents catalog. Developer Preview |
+| `openshift-ai-genai-studio` | Enable Gen AI studio: AI asset endpoints and Playground. Technology Preview; the Playground also needs the `ogx` component |
 
 Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 

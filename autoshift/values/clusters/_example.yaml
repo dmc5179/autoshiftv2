@@ -323,6 +323,7 @@ clusters:
       #                  the 3.5 release notes.
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
+      openshift-ai-genai-studio: 'false'      # Gen AI studio: AI asset endpoints and Playground (Technology Preview)
 
       # =======================================================================
       # Openshift Ai Maas

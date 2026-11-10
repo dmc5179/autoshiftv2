@@ -65,6 +65,16 @@ policies:
       - name: policy-openshift-ai-dsc
     manifests:
       - path: manifests/mcp-catalog
+  # Gen AI studio (AI asset endpoints, Playground): Technology Preview, dashboard flag; the
+  # Playground also needs the ogx component.
+  - name: policy-openshift-ai-genai-studio
+    placement:
+      placementPath: placement-openshift-ai-genai-studio.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/genai-studio
   # Agents catalog: Developer Preview, dashboard flag only.
   - name: policy-openshift-ai-agents-cat
     placement:

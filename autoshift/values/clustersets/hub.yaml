@@ -438,6 +438,8 @@ hubClusterSets:
       # mcplifecycleoperator: Managed). The MCP Gateway itself comes with
       # Connectivity Link 1.5 and needs no label.
       openshift-ai-mcp-catalog: 'true'
+      # Gen AI studio -> AI asset endpoints and Playground (Technology Preview).
+      openshift-ai-genai-studio: 'true'
       # Cloud metadata endpoint deny for the namespaces in config.modelEgress.
       # Stage 1 only; see docs/model-egress-rollout.md in rhoai-mass-quickstart.
       model-egress: 'true'
