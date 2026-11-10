@@ -47,6 +47,11 @@ hubClusterSets:
         # Smaller tool results than the server's 30000 characters, for the small
         # model's context and for tool-result inspection.
         maxResponseChars: 12000
+        # Lightspeed calls the knowledge bridge directly while the MCP gateway is
+        # blocked, so its namespace must be let through the bridge's NetworkPolicy.
+        # Remove this once Lightspeed goes through the gateway.
+        clientNamespaces:
+          - 'openshift-lightspeed'
       # OpenShell sandboxes reach this model through the rhoai-maas provider
       # (openshell-maas label). The key is minted and renewed in the cluster.
       openshell:
