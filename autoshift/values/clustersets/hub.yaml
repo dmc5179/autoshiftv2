@@ -375,6 +375,10 @@ hubClusterSets:
       # reports Compliant — enabled, and silently doing nothing.
       leader-worker-set: 'true'
       connectivity-link: 'true'
+      # Authorino x2 with a disruption budget, Limitador counters on disk (policy-rhcl-ha).
+      rhcl-ha: 'true'
+      rhcl-authorino-replicas: '2'
+      rhcl-limitador-storage: 'disk'
       # Connectivity Link 1.5. The RHOAI 3.5 MaaS documentation (s1.2) still names
       # 1.4.x; 1.5 is a deliberate choice here. Its controller memory bug is handled
       # by the Subscription override in the connectivity-link policy (CONNLINK-1878).
@@ -398,6 +402,9 @@ hubClusterSets:
       openshift-ai-maas-telemetry: 'true'
       openshift-ai-maas-telemetry-capture-user: 'false'
       openshift-ai-maas-telemetry-capture-group: 'false'
+      # maas-api HA (policy-maas-api-ha): two replicas and a disruption budget.
+      openshift-ai-maas-ha: 'true'
+      openshift-ai-maas-api-replicas: '2'
       openshift-ai-models: 'true'
       # MCP Catalog in the dashboard and the MCP Lifecycle Operator (DSC
       # mcplifecycleoperator: Managed). The MCP Gateway itself comes with
