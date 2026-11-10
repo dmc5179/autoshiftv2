@@ -1,0 +1,24 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-policy-rhcl-ha
+  namespace: ${POLICY_NAMESPACE}
+spec:
+  # Authorino and Limitador resilience is opt-in on top of Connectivity Link.
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: 'autoshift.io/connectivity-link'
+              operator: In
+              values:
+                - 'true'
+            - key: 'autoshift.io/rhcl-ha'
+              operator: In
+              values:
+                - 'true'
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists

@@ -2687,6 +2687,12 @@ hubClusterSets:
       # Connectivity Link
       # =======================================================================
       connectivity-link: 'false'
+      # Authorino and Limitador resilience (policy-rhcl-ha): an Authorino disruption budget and
+      # Limitador counters on disk. rhcl-authorino-replicas also sets Authorino's count without
+      # rhcl-ha (default 1); with rhcl-ha it must be 2 or more. Only disk storage is implemented.
+      rhcl-ha: 'true'
+      rhcl-authorino-replicas: '2'
+      rhcl-limitador-storage: 'disk'
       connectivity-link-subscription-name: rhcl-operator
       connectivity-link-channel: stable
       connectivity-link-source: redhat-operators
@@ -2727,6 +2733,10 @@ hubClusterSets:
       openshift-ai-maas-telemetry: 'true'
       openshift-ai-maas-telemetry-capture-user: 'false'
       openshift-ai-maas-telemetry-capture-group: 'false'
+      # maas-api high availability (policy-maas-api-ha): replicas set through the MaasTenantConfig
+      # annotation, plus a disruption budget. Replicas must be 2 or more.
+      openshift-ai-maas-ha: 'true'
+      openshift-ai-maas-api-replicas: '2'
       # maas-api's database. The Secret is created out of band (it holds a
       # password), so these only say where to look for it, never what is in it.
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # redhat-ods-applications on RHOAI 3.4

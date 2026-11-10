@@ -1,0 +1,21 @@
+# Is the HA configuration in effect? Authorino runs the requested replicas, and Limitador came back
+# available on disk storage.
+object-templates-raw: |
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: authorino
+        namespace: kuadrant-system
+      status:
+        availableReplicas: '{{hub (index .ManagedClusterLabels "autoshift.io/rhcl-authorino-replicas" | default "1") | toLiteral hub}}'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: limitador-limitador
+        namespace: kuadrant-system
+      status:
+        availableReplicas: 1

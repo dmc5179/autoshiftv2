@@ -71,3 +71,31 @@ policies:
       - name: policy-rhcl-authorino-cert
     manifests:
       - path: test/authorino-cert-ready.yaml
+  # Authorino and Limitador resilience, opt-in (autoshift.io/rhcl-ha): the Authorino disruption
+  # budget and Limitador disk storage. Waits for Kuadrant to be ready, so the Limitador object
+  # exists before its storage is set.
+  - name: policy-rhcl-ha
+    placement:
+      placementPath: placement-rhcl-ha.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-rhcl-ready
+    manifests:
+      - path: manifests/ha
+  # inform: Authorino and Limitador are available with the HA settings.
+  - name: policy-rhcl-ha-ready
+    remediationAction: inform
+    consolidateManifests: false
+    placement:
+      placementPath: placement-rhcl-ha.yaml
+    dependencies:
+      - name: policy-rhcl-ha
+    manifests:
+      - path: test/rhcl-ha-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ Authorino or Limitador is not available with the HA settings.
+            Check the Authorino replica count against
+            autoshift.io/rhcl-authorino-replicas, and whether Limitador's
+            disk PVC bound: oc get pvc,pods -n kuadrant-system
+

@@ -1,0 +1,44 @@
+# Authorino and Limitador through a node drain. Both sit in the path of every MaaS request:
+# Authorino checks the API key, Limitador counts tokens and requests.
+#
+# Authorino: its replica count is set in manifests/kuadrant/authorino.yaml from
+# autoshift.io/rhcl-authorino-replicas; this adds the PodDisruptionBudget and refuses fewer than
+# 2 replicas, because a budget over one pod blocks every drain.
+#
+# Limitador: in-memory counters reset whenever it restarts, which hands every user a fresh token
+# window. Disk storage (a PVC) keeps them across restarts. It still runs one replica: two
+# replicas would each count separately and double the effective limits; sharing counters
+# needs a Redis-compatible store (spec.storage.redis, Red Hat Connectivity Link 1.5, Install,
+# section 1.7), which this does not set up. Only spec.storage is set; the Kuadrant operator owns
+# the rest of the Limitador object.
+object-templates-raw: |
+  {{hub- $authorino := (index .ManagedClusterLabels "autoshift.io/rhcl-authorino-replicas" | default "1") hub}}
+  {{hub- if not (regexMatch "^([2-9]|[1-9][0-9]+)$" $authorino) hub}}{{hub fail (printf "rhcl-ha: autoshift.io/rhcl-authorino-replicas is %s; set it to 2 or more with rhcl-ha, since a disruption budget over a single replica blocks every node drain" $authorino) hub}}{{hub- end hub}}
+  {{hub- $storage := (index .ManagedClusterLabels "autoshift.io/rhcl-limitador-storage" | default "disk") hub}}
+  {{hub- if ne $storage "disk" hub}}{{hub fail (printf "rhcl-ha: autoshift.io/rhcl-limitador-storage %s is not supported; only disk is implemented" $storage) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: authorino
+        namespace: kuadrant-system
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            authorino-resource: authorino
+            control-plane: controller-manager
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: limitador.kuadrant.io/v1alpha1
+      kind: Limitador
+      metadata:
+        name: limitador
+        namespace: kuadrant-system
+      spec:
+        storage:
+          disk:
+            persistentVolumeClaim:
+              resources:
+                requests: 1Gi

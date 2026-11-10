@@ -30,7 +30,9 @@ metadata:
   namespace: kuadrant-system
 spec:
   clusterWide: true
-  replicas: 1
+  # autoshift.io/rhcl-authorino-replicas, default 1. policy-rhcl-ha adds the disruption budget and
+  # refuses a count below 2 when HA is on. toLiteral makes the label's string an integer.
+  replicas: '{{hub (index .ManagedClusterLabels "autoshift.io/rhcl-authorino-replicas" | default "1") | toLiteral hub}}'
   listener:
     tls:
       # A quoted template piped through toLiteral, not a bare {{ if }}: this is

@@ -135,3 +135,21 @@ oc get authorino authorino -n kuadrant-system -o jsonpath='{.spec.listener.tls.e
 oc get secret authorino-server-cert -n kuadrant-system
 oc get pods -n kuadrant-system
 ```
+
+## High availability
+
+Label `autoshift.io/rhcl-ha: 'true'` (`policy-rhcl-ha`, with `policy-rhcl-ha-ready` as its inform
+check) prepares Authorino and Limitador for node drains. Both sit in the path of every MaaS
+request.
+
+- **Authorino:** its replica count comes from `autoshift.io/rhcl-authorino-replicas` (default 1,
+  set in `manifests/kuadrant/authorino.yaml`, so the label works with or without HA). With
+  `rhcl-ha` the count must be 2 or more, and a PodDisruptionBudget with `minAvailable: 1` is
+  added.
+- **Limitador:** in-memory counters reset whenever Limitador restarts, which gives every user a
+  fresh token window. `rhcl-ha` sets `spec.storage.disk` (a 1 GiB PVC) so the counters survive a
+  restart. Limitador stays at one replica: two would each count separately and double the
+  effective limits. Sharing counters across replicas needs a Redis-compatible store
+  (`spec.storage.redis`, Red Hat Connectivity Link 1.5 *Install*, section 1.7), which is not set up
+  here. `autoshift.io/rhcl-limitador-storage` accepts only `disk` for now.
+

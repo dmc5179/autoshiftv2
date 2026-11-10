@@ -292,6 +292,12 @@ clusters:
       # Connectivity Link
       # =======================================================================
       connectivity-link: 'false'
+      # Authorino and Limitador resilience (policy-rhcl-ha): an Authorino disruption budget and
+      # Limitador counters on disk. rhcl-authorino-replicas also sets Authorino's count without
+      # rhcl-ha (default 1); with rhcl-ha it must be 2 or more. Only disk storage is implemented.
+      rhcl-ha: 'true'
+      rhcl-authorino-replicas: '2'
+      rhcl-limitador-storage: 'disk'
       connectivity-link-subscription-name: rhcl-operator
       connectivity-link-channel: stable
       connectivity-link-source: redhat-operators
@@ -332,6 +338,10 @@ clusters:
       openshift-ai-maas-telemetry: 'true'
       openshift-ai-maas-telemetry-capture-user: 'false'
       openshift-ai-maas-telemetry-capture-group: 'false'
+      # maas-api high availability (policy-maas-api-ha): replicas set through the MaasTenantConfig
+      # annotation, plus a disruption budget. Replicas must be 2 or more.
+      openshift-ai-maas-ha: 'true'
+      openshift-ai-maas-api-replicas: '2'
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
       openshift-ai-maas-db-secret: maas-db-config
 
