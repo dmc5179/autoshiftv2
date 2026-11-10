@@ -32,5 +32,7 @@ object-templates-raw: |
         minAvailable: 1
         selector:
           matchLabels:
+            # tenant-instance, not just name and component: the maas-api-key-cleanup CronJob's
+            # pods carry those two as well, and would otherwise count as expected pods.
             app.kubernetes.io/name: maas-api
-            app.kubernetes.io/component: api
+            maas.opendatahub.io/tenant-instance: maas-api
