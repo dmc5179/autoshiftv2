@@ -27,6 +27,26 @@ hubClusterSets:
       openshiftLightspeed:
         model: 'publishers/llm/models/granite-4-tiny-gpu'
         secretName: 'maas-api-key'
+        # Offline Red Hat docs, DIRECT to the knowledge bridge for now: the shared MCP
+        # gateway is blocked (its controller crash-loops at its shipped limits). The
+        # bridge has no auth, so no headers; its NetworkPolicy admits only
+        # openshift-lightspeed (and the gateway later). Move to the gateway
+        # (ingressHost: mcp, the user's token) once it works.
+        mcpServers:
+          - name: 'redhat-docs'
+            url: 'http://rhokp-mcp.rhokp.svc.cluster.local:8000/mcp'
+            timeout: 60
+        # The CRD default, written down so git describes the cluster.
+        toolBudgetRatio: 0.5
+        # toolResultInspection stays at the operator default (enabled) for the first
+        # test; set it to false if answers are stopped at the tool-call step.
+      # A dedicated RHOKP and the RHEL Knowledge Bridge MCP server (rhokp-mcp label).
+      # The access key Secret rhokp/rhokp-access-key is created out of band
+      # (rhoai-mass-aws: scripts/rhokp-key.sh apply).
+      rhokpMcp:
+        # Smaller tool results than the server's 30000 characters, for the small
+        # model's context and for tool-result inspection.
+        maxResponseChars: 12000
       # OpenShell sandboxes reach this model through the rhoai-maas provider
       # (openshell-maas label). The key is minted and renewed in the cluster.
       openshell:
@@ -418,6 +438,11 @@ hubClusterSets:
       # openshift-lightspeed, created out of band with a minted MaaS key.
       # Use this policy OR scripts/40-lightspeed.sh, not both.
       openshift-lightspeed: 'true'
+      # Offline Red Hat docs for Lightspeed: RHOKP and the knowledge bridge (community
+      # tier; the access key Secret first). About 1 CPU, 2-4 GiB and tens of GiB of
+      # node ephemeral storage for RHOKP. The mcp-gateway label stays off until the
+      # gateway controller is fixed.
+      rhokp-mcp: 'true'
       openshift-lightspeed-subscription-name: lightspeed-operator
       openshift-lightspeed-channel: stable
       openshift-lightspeed-source: redhat-operators
