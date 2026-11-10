@@ -349,6 +349,35 @@ hubClusterSets:
         #   oc create secret generic maas-api-key -n openshift-lightspeed \
         #     --from-literal=apitoken=<key>
         secretName: 'maas-api-key'               # default: maas-api-key
+        # Optional. More MCP servers the assistant may call (Technology Preview in Lightspeed;
+        # renders the MCPServer feature gate). Each entry has url, or ingressHost (plus path,
+        # default /mcp) for https://<ingressHost>.<cluster ingress domain><path>. timeout
+        # defaults to 60 seconds; the CRD's own default is 5. Not 'openshift', the built-in
+        # server's name. Removing an entry here does not remove it from the OLSConfig.
+        mcpServers:
+          # The MCP gateway (mcp-gateway policy), with the user's own token, so the gateway's
+          # tool access entries decide what each user may call.
+          - name: 'redhat-docs'
+            ingressHost: 'mcp'
+            path: '/mcp'                         # default: /mcp
+            timeout: 60
+            headers:
+              - name: 'Authorization'
+                valueFrom:
+                  type: 'kubernetes'
+          # An in-cluster server called directly, for example the rhokp-mcp knowledge bridge
+          # without the gateway (add openshift-lightspeed to config.rhokpMcp.clientNamespaces).
+          - name: 'redhat-docs-direct'
+            url: 'http://rhokp-mcp.rhokp.svc.cluster.local:8000/mcp'
+            timeout: 60
+        # Optional, true or false; unset leaves the operator default, enabled. false is the
+        # documented workaround when tool-result inspection fails at the tool call step for a
+        # model (OpenShift Lightspeed 1.1.5 known issue; OLS-4416). It applies to every MCP
+        # server, the built-in one included. Set it back to true rather than removing it.
+        toolResultInspection: true
+        # Optional, 0.1 to 0.5: the share of the model's context window for tool results.
+        # The CRD default is 0.5.
+        toolBudgetRatio: 0.5
 
       # =======================================================================
       # cert-manager — issuer refs + SANs (DATA; the ENABLE flags are labels below:
