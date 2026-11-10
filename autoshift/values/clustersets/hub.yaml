@@ -38,8 +38,11 @@ hubClusterSets:
             timeout: 60
         # The CRD default, written down so git describes the cluster.
         toolBudgetRatio: 0.5
-        # toolResultInspection stays at the operator default (enabled) for the first
-        # test; set it to false if answers are stopped at the tool-call step.
+        # Tool-result inspection off: it is judged by the same small Granite model, and
+        # stopped RHOKP docs answers on sandbox141 ("a tool result failed the safety
+        # inspection", within 2 s). Disabling it is Red Hat's documented workaround
+        # (OLS 1.1.5 known issue, OLS-4416). Re-enable with a larger judge model.
+        toolResultInspection: false
       # A dedicated RHOKP and the RHEL Knowledge Bridge MCP server (rhokp-mcp label).
       # The access key Secret rhokp/rhokp-access-key is created out of band
       # (rhoai-mass-aws: scripts/rhokp-key.sh apply).
