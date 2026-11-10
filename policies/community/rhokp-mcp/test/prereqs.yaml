@@ -1,0 +1,36 @@
+# Is the RHOKP access key there?
+#
+# inform-only. The key is a licensed credential (it comes with a Satellite Infrastructure
+# subscription, SKU MCT3718), so it never comes from git or values and no policy creates it. An
+# administrator creates the Secret out of band, in the namespace policy-rhokp-mcp-ns creates:
+#
+#   oc create secret generic rhokp-access-key -n rhokp --from-file=ACCESS_KEY=<file holding the key>
+#
+# rhoai-mass-aws has scripts/rhokp-key.sh for this, which reads the key from secrets/rhokp.env.
+#
+# Why a gate rather than letting the pod fail: RHOKP without a valid key starts, serves HTTP 200 on
+# its web UI, and has an empty search index. Every check that looks only at the Deployment would
+# pass. The RHOKP Deployment also reads the key without optional: true, so a missing Secret stops
+# the pod at creation rather than starting it keyless.
+#
+# The check runs on the managed cluster and reads only whether the key exists and is non-empty,
+# never its value. It fails with the command to run, rather than rendering nothing, because an empty
+# ConfigurationPolicy reports Compliant and would release every policy that depends on this one.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- if not $raw hub}}{{hub fail "rhokp-mcp: the rendered-config ConfigMap for this cluster is missing" hub}}{{hub- end hub}}
+  {{hub- $c := (index ($raw | fromYaml | default dict) "rhokpMcp" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "rhokp" $c) hub}}
+  {{hub- $secret := (dig "accessKeySecret" "rhokp-access-key" $c) hub}}
+  {{hub- $key := (dig "accessKeySecretKey" "ACCESS_KEY" $c) hub}}
+  {{hub- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.namespace %s is not a valid namespace name" $ns) hub}}{{hub- end hub}}
+  {{- $s := (lookup "v1" "Secret" "{{hub $ns hub}}" "{{hub $secret hub}}") | default dict }}
+  {{- if not $s }}{{ fail "RHOKP access key Secret {{hub $ns hub}}/{{hub $secret hub}} does not exist. Create it out of band with the key under {{hub $key hub}}: oc create secret generic {{hub $secret hub}} -n {{hub $ns hub}} --from-file={{hub $key hub}}=<file holding the key>. In rhoai-mass-aws: scripts/rhokp-key.sh apply." }}{{- end }}
+  {{- if not (dig "data" "{{hub $key hub}}" "" $s) }}{{ fail "RHOKP access key Secret {{hub $ns hub}}/{{hub $secret hub}} has no non-empty {{hub $key hub}} key. RHOKP reads the key from that name; recreate the Secret with it." }}{{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: '{{hub $secret hub}}'
+        namespace: '{{hub $ns hub}}'

@@ -392,6 +392,10 @@ clusters:
       openshell-version: 'v0.1.6-rhaiv.4'
       openshell-maas: 'false'
 
+      # RHOKP and the RHEL Knowledge Bridge MCP server (policies/community/rhokp-mcp).
+      # Reads config.rhokpMcp; the access key Secret is created out of band.
+      rhokp-mcp: 'false'
+
       # =======================================================================
       # Hermes Agent
       # =======================================================================

@@ -1,0 +1,21 @@
+# Is every MCP server replica up?
+#
+# inform-only. Ready on a pod means the server answers on /metrics. Whether it reaches RHOKP and
+# lists its tools is what the MCP gateway's MCPServerRegistration Ready reports, in
+# policy-mcp-gateway-ready.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- if not $raw hub}}{{hub fail "rhokp-mcp: the rendered-config ConfigMap for this cluster is missing" hub}}{{hub- end hub}}
+  {{hub- $c := (index ($raw | fromYaml | default dict) "rhokpMcp" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "rhokp" $c) hub}}
+  {{hub- $replicas := (dig "mcpReplicas" 2 $c | toString) hub}}
+  {{hub- if not (regexMatch "^[1-9]$" $replicas) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.mcpReplicas %s must be a whole number from 1 to 9" $replicas) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+      status:
+        availableReplicas: {{hub $replicas hub}}

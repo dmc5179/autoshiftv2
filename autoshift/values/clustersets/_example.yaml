@@ -247,6 +247,34 @@ hubClusterSets:
         contextLength: '131072'
 
       # =======================================================================
+      # rhokp-mcp: a dedicated Red Hat Offline Knowledge Portal and the RHEL Knowledge Bridge MCP
+      # server in front of it (DATA; the ENABLE flag is the rhokp-mcp label below). Every key
+      # has a default. The access key is a credential: an administrator creates the Secret out
+      # of band, and policy-rhokp-mcp-prereqs reports it missing.
+      # =======================================================================
+      rhokpMcp:
+        namespace: 'rhokp'                        # default: rhokp, created by the policy
+        accessKeySecret: 'rhokp-access-key'       # default; created out of band, never from values
+        accessKeySecretKey: 'ACCESS_KEY'          # default
+        # Pinned by digest; a tag is refused. RHOKP content is republished about weekly, and
+        # every bump is a fresh 7 to 10 GB pull and a re-index.
+        rhokpImage: 'registry.redhat.io/offline-knowledge-portal/rhokp-rhel9@sha256:1ac156d35e14315011687c3740443e07d66c8d7d5be6839920cb2af7d8c65ce1'   # default, tag 1.3.0-1793303796
+        mcpImage: 'registry.redhat.io/rhel-cla/rhel-knowledge-bridge-rhel10@sha256:99fd47d068c6b99db3068a7276c80e1d0bf98d3a1e908cae2d23b2b4571f7086'   # default, tag v1.0.2-1793868366
+        rhokpCpuRequest: '1'                      # default
+        rhokpMemoryRequest: '2Gi'                 # default
+        rhokpMemoryLimit: '4Gi'                   # default
+        solrStorageRequest: '20Gi'                # default; node ephemeral storage for the index
+        solrStorageLimit: '75Gi'                  # default; the index emptyDir sizeLimit
+        mcpReplicas: 2                            # default: 2
+        logLevel: 'INFO'                          # default
+        maxResponseChars: 12000                   # default: the server's own, 30000
+        excludeKbase: false                       # default
+        # Namespaces allowed to call the MCP server directly, besides openshift-ingress and the
+        # MCP gateway namespace. Example: Lightspeed, for a direct connection without the gateway.
+        clientNamespaces:
+          - 'openshift-lightspeed'
+
+      # =======================================================================
       # openshell: the Models-as-a-Service provider for OpenShell sandboxes (DATA; the ENABLE
       # flags are the openshell and openshell-maas labels below). The key is minted in the
       # cluster with a ServiceAccount token, so nothing here is a credential.
@@ -2669,6 +2697,11 @@ hubClusterSets:
       # Sandboxes reach a Models-as-a-Service model through the rhoai-maas provider. Needs
       # config.openshell.maas, plus openshift-ai-maas and openshift-ai-models on the same cluster.
       openshell-maas: 'false'
+
+      # RHOKP and the RHEL Knowledge Bridge MCP server (policies/community/rhokp-mcp). The
+      # knowledge bridge is a Developer Preview image, and RHOKP needs an access key from a
+      # Satellite Infrastructure subscription. Reads config.rhokpMcp.
+      rhokp-mcp: 'false'
 
       # =======================================================================
       # Nvidia Gpu Operator

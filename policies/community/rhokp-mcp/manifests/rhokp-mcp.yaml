@@ -1,0 +1,153 @@
+# The RHEL Knowledge Bridge: the MCP server (okp-mcp) that turns tool calls into RHOKP searches.
+# Tools: search_portal and get_document, plus run_code, a placeholder that only logs a warning.
+# The MCP gateway hides run_code through its tool access entries (config.mcpGateway).
+#
+# Shape from the okp-mcp repository (openshift/02-rhokp-mcp-server.yaml), with probes on /metrics
+# (the server's only plain GET endpoint) and no Route. Streamable HTTP on 8000 at /mcp, stateless,
+# so replicas need no session affinity.
+#
+# The server has no authentication and no TLS of its own. It is reached only through the MCP
+# gateway, or by a namespace listed in config.rhokpMcp.clientNamespaces; see namespace.yaml.
+#
+# A Ready pod says the server is up, not that Solr answers: the server starts with Solr
+# unreachable. That is why policy-rhokp-mcp waits for policy-rhokp-server-ready, and why the
+# gateway's MCPServerRegistration Ready (the broker connected and listed tools) is the end-to-end
+# check, in policy-mcp-gateway-ready.
+#
+# mustonlyhave on the Deployment: musthave merges into containers[] and env[], and would silently
+# never apply an image or setting change.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- if not $raw hub}}{{hub fail "rhokp-mcp: the rendered-config ConfigMap for this cluster is missing" hub}}{{hub- end hub}}
+  {{hub- $c := (index ($raw | fromYaml | default dict) "rhokpMcp" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "rhokp" $c) hub}}
+  {{hub- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.namespace %s is not a valid namespace name" $ns) hub}}{{hub- end hub}}
+  {{hub- $image := (dig "mcpImage" "registry.redhat.io/rhel-cla/rhel-knowledge-bridge-rhel10@sha256:99fd47d068c6b99db3068a7276c80e1d0bf98d3a1e908cae2d23b2b4571f7086" $c) hub}}
+  {{hub- if not (contains "@sha256:" $image) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.mcpImage %s must be pinned by digest (@sha256:...)" $image) hub}}{{hub- end hub}}
+  {{hub- $replicas := (dig "mcpReplicas" 2 $c | toString) hub}}
+  {{hub- if not (regexMatch "^[1-9]$" $replicas) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.mcpReplicas %s must be a whole number from 1 to 9" $replicas) hub}}{{hub- end hub}}
+  {{hub- $logLevel := (dig "logLevel" "INFO" $c | upper) hub}}
+  {{hub- if not (has $logLevel (list "DEBUG" "INFO" "WARNING" "ERROR" "CRITICAL")) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.logLevel %s must be DEBUG, INFO, WARNING, ERROR or CRITICAL" $logLevel) hub}}{{hub- end hub}}
+  {{hub- $maxChars := (dig "maxResponseChars" "" $c | toString) hub}}
+  {{hub- if and $maxChars (not (regexMatch "^[1-9][0-9]*$" $maxChars)) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.maxResponseChars %s must be a positive whole number" $maxChars) hub}}{{hub- end hub}}
+  {{hub- $excludeKbase := (eq (printf "%v" (dig "excludeKbase" false $c)) "true") hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: rhokp-mcp
+          app.kubernetes.io/part-of: rhokp-mcp
+      spec:
+        replicas: {{hub $replicas hub}}
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: rhokp-mcp
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: rhokp-mcp
+              app.kubernetes.io/part-of: rhokp-mcp
+          spec:
+            serviceAccountName: rhokp-mcp
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: ScheduleAnyway
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: rhokp-mcp
+            containers:
+              - name: rhokp-mcp
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: MCP_TRANSPORT
+                    value: streamable-http
+                  - name: MCP_SOLR_URL
+                    value: 'http://rhokp-server.{{hub $ns hub}}.svc.cluster.local:8983'
+                  - name: MCP_LOG_LEVEL
+                    value: '{{hub $logLevel hub}}'
+                  {{hub- if $maxChars hub}}
+                  # One tool result per call, in characters. A smaller result is easier on a small
+                  # model's context and on Lightspeed's tool-result inspection.
+                  - name: MCP_MAX_RESPONSE_CHARS
+                    value: '{{hub $maxChars hub}}'
+                  {{hub- end hub}}
+                  {{hub- if $excludeKbase hub}}
+                  # For a content set without solutions and articles.
+                  - name: MCP_EXCLUDE_KBASE
+                    value: 'true'
+                  {{hub- end hub}}
+                ports:
+                  - name: mcp
+                    containerPort: 8000
+                    protocol: TCP
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                readinessProbe:
+                  httpGet:
+                    path: /metrics
+                    port: mcp
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+                livenessProbe:
+                  httpGet:
+                    path: /metrics
+                    port: mcp
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 500m
+                    memory: 256Mi
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: rhokp-mcp
+          app.kubernetes.io/part-of: rhokp-mcp
+      spec:
+        type: ClusterIP
+        selector:
+          app.kubernetes.io/name: rhokp-mcp
+        ports:
+          - name: mcp
+            port: 8000
+            targetPort: 8000
+            protocol: TCP
+  # At most one replica down at a time through node drains. maxUnavailable rather than
+  # minAvailable, so the budget never blocks a drain when mcpReplicas is 1.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: rhokp-mcp

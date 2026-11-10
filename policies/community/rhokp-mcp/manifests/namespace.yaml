@@ -1,0 +1,136 @@
+# The namespace RHOKP and the MCP server run in, their ServiceAccounts, and the NetworkPolicies
+# that keep both cluster-internal.
+#
+# Neither workload has authentication, and the knowledge bridge has no TLS either. RHOKP's content
+# is licensed for internal use only, and its terms say not to share the image, its content or the
+# access key. So nothing here creates a Route, and the NetworkPolicies admit only:
+#
+#   RHOKP (8080 HTML mirror, 8983 Solr)   the MCP server pods
+#   MCP server (8000)                     openshift-ingress, where the MCP gateway's Envoy pods
+#                                         route tools/call; the gateway namespace, where the broker
+#                                         discovers tools; and config.rhokpMcp.clientNamespaces,
+#                                         for a client that calls the server directly
+#
+# RHOKP gets no egress at all, as Lightspeed's own RHOKP does: it works fully offline. The MCP
+# server may reach only RHOKP and cluster DNS.
+#
+# The ServiceAccounts mount no token: neither workload calls the Kubernetes API.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- if not $raw hub}}{{hub fail "rhokp-mcp: the rendered-config ConfigMap for this cluster is missing" hub}}{{hub- end hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $c := (index $cfg "rhokpMcp" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "rhokp" $c) hub}}
+  {{hub- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.namespace %s is not a valid namespace name" $ns) hub}}{{hub- end hub}}
+  {{hub- $gwNs := (dig "mcpGateway" "gateway" "namespace" "mcp-gateway" $cfg) hub}}
+  {{hub- $clients := (list "openshift-ingress" $gwNs) hub}}
+  {{hub- range $x := (dig "clientNamespaces" (list) $c) hub}}
+  {{hub- if not (has $x $clients) hub}}{{hub- $clients = (append $clients $x) hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/part-of: rhokp-mcp
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rhokp-server
+        namespace: '{{hub $ns hub}}'
+      automountServiceAccountToken: false
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+      automountServiceAccountToken: false
+  # Anything in the namespace without a policy of its own takes no ingress.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: default-deny-ingress
+        namespace: '{{hub $ns hub}}'
+      spec:
+        podSelector: {}
+        policyTypes:
+          - Ingress
+  # mustonlyhave on every NetworkPolicy: they are lists of peers, and under musthave a peer removed
+  # from config would stay admitted.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: rhokp-server
+        namespace: '{{hub $ns hub}}'
+      spec:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: rhokp-server
+        policyTypes:
+          - Ingress
+          - Egress
+        ingress:
+          - from:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: rhokp-mcp
+            ports:
+              - protocol: TCP
+                port: 8080
+              - protocol: TCP
+                port: 8983
+        # Egress in policyTypes with no egress rules: no egress at all.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: rhokp-mcp
+        namespace: '{{hub $ns hub}}'
+      spec:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: rhokp-mcp
+        policyTypes:
+          - Ingress
+          - Egress
+        ingress:
+          - from:
+              - namespaceSelector:
+                  matchExpressions:
+                    - key: kubernetes.io/metadata.name
+                      operator: In
+                      values: {{hub $clients | toJson hub}}
+            ports:
+              - protocol: TCP
+                port: 8000
+        egress:
+          - to:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: rhokp-server
+            ports:
+              - protocol: TCP
+                port: 8080
+              - protocol: TCP
+                port: 8983
+          # Cluster DNS. The DNS pods listen on 5353; the Service maps 53 to it.
+          - to:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: openshift-dns
+            ports:
+              - protocol: UDP
+                port: 5353
+              - protocol: TCP
+                port: 5353

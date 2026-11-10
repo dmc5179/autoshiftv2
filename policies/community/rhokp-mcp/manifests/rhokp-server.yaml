@@ -1,0 +1,169 @@
+# Red Hat Offline Knowledge Portal (RHOKP): the Solr search index and the HTML mirror of Red Hat
+# documentation, solutions, articles, CVEs and errata. A dedicated instance, separate from the one
+# OpenShift Lightspeed runs: Lightspeed's has an empty "portal" core without a key, a different
+# schema in its own core, and an operator-owned NetworkPolicy that admits only its own namespace.
+#
+# Shape from the okp-mcp repository (openshift/01-rhokp.yaml), with three changes:
+#   - the index lives on an emptyDir with a size limit instead of the container's writable layer,
+#     at the path Lightspeed's RHOKP uses (/var/solr/data), so it is bounded and counted;
+#   - probes, which the okp-mcp manifest has none of;
+#   - the access key Secret is not optional, so a missing key stops the pod at creation.
+#
+# Readiness means "search returns documents". RHOKP without a valid key starts, serves HTTP 200
+# and has an empty portal core, which every Available check would accept. The readiness probe
+# queries the portal core and passes only when numFound is at least 1, so Available, and with it
+# policy-rhokp-server-ready, means the MCP server will get results. The first start indexes for
+# minutes, so the startup probe allows 30.
+#
+# The index is rebuilt on every start: an emptyDir does not survive the pod. One replica with
+# Recreate, so a rollout never runs two pods each pulling and indexing 7 to 10 GB.
+#
+# mustonlyhave on the Deployment: musthave merges into containers[] and would silently never
+# apply an image or env change.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- if not $raw hub}}{{hub fail "rhokp-mcp: the rendered-config ConfigMap for this cluster is missing" hub}}{{hub- end hub}}
+  {{hub- $c := (index ($raw | fromYaml | default dict) "rhokpMcp" | default dict) hub}}
+  {{hub- $ns := (dig "namespace" "rhokp" $c) hub}}
+  {{hub- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.namespace %s is not a valid namespace name" $ns) hub}}{{hub- end hub}}
+  {{hub- $secret := (dig "accessKeySecret" "rhokp-access-key" $c) hub}}
+  {{hub- $key := (dig "accessKeySecretKey" "ACCESS_KEY" $c) hub}}
+  {{hub- $image := (dig "rhokpImage" "registry.redhat.io/offline-knowledge-portal/rhokp-rhel9@sha256:1ac156d35e14315011687c3740443e07d66c8d7d5be6839920cb2af7d8c65ce1" $c) hub}}
+  {{hub- if not (contains "@sha256:" $image) hub}}{{hub fail (printf "rhokp-mcp: config.rhokpMcp.rhokpImage %s must be pinned by digest (@sha256:...); a disconnected mirror serves digests, and a tag moves weekly" $image) hub}}{{hub- end hub}}
+  {{hub- $cpu := (dig "rhokpCpuRequest" "1" $c | toString) hub}}
+  {{hub- $mem := (dig "rhokpMemoryRequest" "2Gi" $c | toString) hub}}
+  {{hub- $memLimit := (dig "rhokpMemoryLimit" "4Gi" $c | toString) hub}}
+  {{hub- $storage := (dig "solrStorageRequest" "20Gi" $c | toString) hub}}
+  {{hub- $storageLimit := (dig "solrStorageLimit" "75Gi" $c | toString) hub}}
+  {{hub- range $q := (list $cpu $mem $memLimit $storage $storageLimit) hub}}
+  {{hub- if not (regexMatch "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$" $q) hub}}{{hub fail (printf "rhokp-mcp: %s in config.rhokpMcp is not a Kubernetes quantity" $q) hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rhokp-server
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: rhokp-server
+          app.kubernetes.io/part-of: rhokp-mcp
+      spec:
+        replicas: 1
+        strategy:
+          type: Recreate
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: rhokp-server
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: rhokp-server
+              app.kubernetes.io/part-of: rhokp-mcp
+          spec:
+            serviceAccountName: rhokp-server
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - name: rhokp
+                image: '{{hub $image hub}}'
+                imagePullPolicy: IfNotPresent
+                env:
+                  - name: SOLR_JETTY_HOST
+                    value: 0.0.0.0
+                  - name: ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: '{{hub $secret hub}}'
+                        key: '{{hub $key hub}}'
+                ports:
+                  - name: http
+                    containerPort: 8080
+                    protocol: TCP
+                  - name: solr
+                    containerPort: 8983
+                    protocol: TCP
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                # The same query for startup and readiness: the portal core, which the MCP server
+                # queries, holds at least one document. An exec probe because the answer is in the
+                # response body, and an HTTP probe passes on any 200. If curl or grep were missing
+                # from the image the probe would fail, never pass: the pod stays unready and
+                # policy-rhokp-server-ready says so.
+                startupProbe:
+                  exec:
+                    command:
+                      - /bin/sh
+                      - -c
+                      - >-
+                        curl -sf --max-time 8
+                        'http://127.0.0.1:8983/solr/portal/select?q=*:*&rows=0&wt=json&indent=false'
+                        | grep -Eq '"numFound": ?[1-9]'
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 60
+                readinessProbe:
+                  exec:
+                    command:
+                      - /bin/sh
+                      - -c
+                      - >-
+                        curl -sf --max-time 8
+                        'http://127.0.0.1:8983/solr/portal/select?q=*:*&rows=0&wt=json&indent=false'
+                        | grep -Eq '"numFound": ?[1-9]'
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+                # Liveness is only "Solr answers": restarting would throw away the index, so an
+                # empty core must not trigger it.
+                livenessProbe:
+                  tcpSocket:
+                    port: solr
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+                resources:
+                  requests:
+                    cpu: '{{hub $cpu hub}}'
+                    memory: '{{hub $mem hub}}'
+                    ephemeral-storage: '{{hub $storage hub}}'
+                  limits:
+                    memory: '{{hub $memLimit hub}}'
+                volumeMounts:
+                  - name: solr-data
+                    mountPath: /var/solr/data
+            volumes:
+              - name: solr-data
+                emptyDir:
+                  sizeLimit: '{{hub $storageLimit hub}}'
+  # 8080 is the HTML mirror get_document reads section anchors from; 8983 is Solr. No Route: see
+  # namespace.yaml.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: rhokp-server
+        namespace: '{{hub $ns hub}}'
+        labels:
+          app.kubernetes.io/name: rhokp-server
+          app.kubernetes.io/part-of: rhokp-mcp
+      spec:
+        type: ClusterIP
+        selector:
+          app.kubernetes.io/name: rhokp-server
+        ports:
+          - name: http
+            port: 8080
+            targetPort: 8080
+            protocol: TCP
+          - name: solr
+            port: 8983
+            targetPort: 8983
+            protocol: TCP

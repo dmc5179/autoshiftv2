@@ -1,0 +1,15 @@
+# Spoke-side objects the rhokp-mcp policies read on the managed cluster.
+# Values are deliberately fake and low-entropy: this directory is not allowlisted in
+# .gitleaks.toml.
+#
+# The RHOKP access key Secret an administrator creates out of band. policy-rhokp-mcp-prereqs
+# checks that it exists and that the key is non-empty, never what it holds.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rhokp-access-key
+  namespace: rhokp
+type: Opaque
+data:
+  # fake: base64 of "test-key"
+  ACCESS_KEY: dGVzdC1rZXk=

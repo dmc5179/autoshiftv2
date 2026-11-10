@@ -1,0 +1,87 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: rhokp-mcp
+# Per-deployment scalars (${...}) are substituted by the repo-server CMP (envsubst/sed) BEFORE
+# `kustomize build` runs. They live here and in placement.yaml, never in manifests/, whose hub
+# templates contain `$vars` that substitution would clobber.
+#
+# What is deployed comes from config.rhokpMcp in the cluster's rendered-config: images are not
+# allowed in label values, and every key has a default.
+#
+# Every policy shares placement.yaml, so the shared PlacementBinding needs an explicit name.
+placementBindingDefaults:
+  name: binding-policy-rhokp-mcp
+policyDefaults:
+  namespace: ${POLICY_NAMESPACE}
+  # ${REMEDIATION} = inform when autoshift.dryRun, else enforce.
+  remediationAction: ${REMEDIATION}
+  severity: medium
+  consolidateManifests: true
+  evaluationInterval:
+    compliant: ${EVAL_COMPLIANT}
+    noncompliant: ${EVAL_NONCOMPLIANT}
+  standards:
+    - NIST SP 800-53
+  categories:
+    - CM Configuration Management
+  controls:
+    - CM-2 Baseline Configuration
+  # Unplacing a policy, or turning the label off, stops management and deletes nothing. The
+  # index is rebuilt on every start anyway; the point is that removal is a deliberate act.
+  pruneObjectBehavior: None
+  placement:
+    placementPath: placement.yaml
+policies:
+  # inform: the access key Secret exists, created out of band, and holds a non-empty key.
+  # Without it RHOKP starts, serves HTTP 200 and has an empty search index, so nothing that
+  # needs it is created first.
+  - name: policy-rhokp-mcp-prereqs
+    remediationAction: inform
+    consolidateManifests: false
+    manifests:
+      - path: test/prereqs.yaml
+    customMessage:
+      noncompliant: '{{ regexReplaceAll "(?s).*error calling fail: " .DefaultMessage "" | trim }}'
+  # The namespace, the ServiceAccounts and the NetworkPolicies. No dependency, so the namespace
+  # exists for the out-of-band Secret to go into.
+  - name: policy-rhokp-mcp-ns
+    manifests:
+      - path: manifests/namespace.yaml
+  # RHOKP: the Solr index and the HTML mirror. Its readiness probe passes only when the portal
+  # core holds documents.
+  - name: policy-rhokp-server
+    dependencies:
+      - name: policy-rhokp-mcp-prereqs
+      - name: policy-rhokp-mcp-ns
+    manifests:
+      - path: manifests/rhokp-server.yaml
+  # inform: RHOKP is Available, which by its readiness probe means search returns documents.
+  - name: policy-rhokp-server-ready
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-rhokp-server
+    manifests:
+      - path: test/rhokp-server-ready.yaml
+    customMessage:
+      noncompliant: >-
+        RHOKP is not ready: its portal search index has no documents yet. The first start
+        pulls a 7 to 10 GB image and indexes for several minutes. If it stays unready for more
+        than 30 minutes, check the access key (an invalid or missing key leaves the index
+        empty while the web UI still answers): oc logs deploy/rhokp-server -n <namespace>.
+  # The RHEL Knowledge Bridge MCP server. Waits for search to work, not just for RHOKP to exist:
+  # the MCP server starts happily with Solr unreachable and answers every query with nothing.
+  - name: policy-rhokp-mcp
+    dependencies:
+      - name: policy-rhokp-server-ready
+    manifests:
+      - path: manifests/rhokp-mcp.yaml
+  # inform: every MCP replica is Available.
+  - name: policy-rhokp-mcp-ready
+    remediationAction: inform
+    consolidateManifests: false
+    dependencies:
+      - name: policy-rhokp-mcp
+    manifests:
+      - path: test/rhokp-mcp-ready.yaml
