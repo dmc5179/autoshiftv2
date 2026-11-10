@@ -394,6 +394,10 @@ hubClusterSets:
       openshift-ai-version: 'rhods-operator.3.5.2'
 
       openshift-ai-maas: 'true'
+      # MaaS telemetry (policy-maas-telemetry). No per-user or per-group labels.
+      openshift-ai-maas-telemetry: 'true'
+      openshift-ai-maas-telemetry-capture-user: 'false'
+      openshift-ai-maas-telemetry-capture-group: 'false'
       openshift-ai-models: 'true'
       # MCP Catalog in the dashboard and the MCP Lifecycle Operator (DSC
       # mcplifecycleoperator: Managed). The MCP Gateway itself comes with
