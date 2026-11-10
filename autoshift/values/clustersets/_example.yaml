@@ -2721,6 +2721,12 @@ hubClusterSets:
       # Turning it off stops that management and removes nothing, like most
       # AutoShift labels; MaaS keeps running until set to Removed by hand.
       openshift-ai-maas: 'false'
+      # MaaS telemetry: subscription and model labels on the token and request counters
+      # (policy-maas-telemetry). The capture labels add per-user / per-group labels, which put
+      # user names into metrics; leave them 'false' unless that is wanted.
+      openshift-ai-maas-telemetry: 'true'
+      openshift-ai-maas-telemetry-capture-user: 'false'
+      openshift-ai-maas-telemetry-capture-group: 'false'
       # maas-api's database. The Secret is created out of band (it holds a
       # password), so these only say where to look for it, never what is in it.
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # redhat-ods-applications on RHOAI 3.4

@@ -83,3 +83,32 @@ policies:
       - name: policy-openshift-ai-maas
     manifests:
       - path: test/gateway-programmed.yaml
+  # MaaS telemetry, opt-in (autoshift.io/openshift-ai-maas-telemetry). Puts subscription and model
+  # labels on the Limitador counters. Depends on -db rather than the install: maas-controller
+  # creates default-tenant only once maas-api is up, and a musthave would otherwise create the
+  # object ahead of it.
+  - name: policy-maas-telemetry
+    placement:
+      placementPath: placement-openshift-ai-maas-telemetry.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-maas-db
+    manifests:
+      - path: manifests/telemetry
+  # inform: the objects telemetry produces exist.
+  - name: policy-maas-telemetry-ready
+    remediationAction: inform
+    consolidateManifests: false
+    placement:
+      placementPath: placement-openshift-ai-maas-telemetry.yaml
+    dependencies:
+      - name: policy-maas-telemetry
+    manifests:
+      - path: test/telemetry-ready.yaml
+        customMessage:
+          noncompliant: >
+            ❌ MaaS telemetry is not in effect. Check spec.telemetry.enabled on
+            MaasTenantConfig default-tenant in models-as-a-service (the 3.5 docs
+            call it Tenant; on 3.5.2 it is MaasTenantConfig), then whether
+            maas-controller created TelemetryPolicy maas-telemetry:
+            oc get telemetrypolicies.extensions.kuadrant.io -n openshift-ingress

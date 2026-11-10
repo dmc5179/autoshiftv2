@@ -1,0 +1,27 @@
+# MaaS telemetry: subscription and model labels on the Limitador token and request counters, which
+# is what the MaaS usage dashboard and any per-subscription PromQL need.
+#
+# The RHOAI 3.5 docs (Govern LLM access with MaaS, section 1.18.3) say to patch a `Tenant`. On
+# 3.5.2 that CRD has no instances; the live object is this MaasTenantConfig, which maas-controller
+# creates. A policy written from the docs would create an unused Tenant and report Compliant.
+#
+# `enabled` is set explicitly: maas-controller creates default-tenant with `spec: {}`, and the
+# CRD's default for `enabled` only applies when `telemetry` itself is present.
+#
+# Per-user and per-group labels are off unless a label asks for them. They put user names into
+# metrics, and one series per user and model is the cardinality to watch on a loaded hub. The
+# label value is compared as a string, and toLiteral turns the result into a real boolean, since
+# the CRD rejects the string "true".
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaasTenantConfig
+metadata:
+  name: default-tenant
+  namespace: models-as-a-service
+spec:
+  telemetry:
+    enabled: true
+    metrics:
+      captureOrganization: true
+      captureModelUsage: true
+      captureUser: '{{hub eq (index .ManagedClusterLabels "autoshift.io/openshift-ai-maas-telemetry-capture-user" | default "false") "true" | toString | toLiteral hub}}'
+      captureGroup: '{{hub eq (index .ManagedClusterLabels "autoshift.io/openshift-ai-maas-telemetry-capture-group" | default "false") "true" | toString | toLiteral hub}}'
