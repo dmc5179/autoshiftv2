@@ -6,14 +6,27 @@
 # tracing), which needs Tempo, OpenTelemetry and the Cluster Observability
 # Operator installed first. AutoShift has policies for all three - enable
 # those and patch this afterwards rather than up front.
-apiVersion: dscinitialization.opendatahub.io/v2
-kind: DSCInitialization
-metadata:
-  name: default-dsci
-spec:
+#
+# The spec is this base with config.openshift-ai.dscInitialization merged over it (maps merge key
+# by key and config wins), so the applications namespace, a custom CA bundle or the monitoring
+# settings can be set per clusterset or cluster.
+object-templates-raw: |
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
+  {{hub- $spec := (`
   applicationsNamespace: redhat-ods-applications
   monitoring:
     managementState: Managed
   trustedCABundle:
     customCABundle: ""
     managementState: Managed
+  ` | fromYaml) hub}}
+  {{hub- $spec = (mergeOverwrite $spec (dig "openshift-ai" "dscInitialization" (dict) $cfg)) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: dscinitialization.opendatahub.io/v2
+      kind: DSCInitialization
+      metadata:
+        name: default-dsci
+      spec:
+        {{hub $spec | toYaml | autoindent hub}}

@@ -49,8 +49,15 @@ policies:
       - path: manifests/dsc
   - name: policy-openshift-ai-ready
     remediationAction: inform
+    consolidateManifests: false
     dependencies:
       - name: policy-openshift-ai-dsc
+    customMessage:
+      noncompliant: >-
+        The DataScienceCluster default-dsc is not Ready. Its status conditions name the component
+        that failed. Common causes are a component whose operator prerequisite is missing, a
+        config.openshift-ai.dataScienceCluster value the CRD rejects, and llamastackoperator set
+        to Managed alongside ogx, which aborts module provisioning.
     manifests:
       - path: test/dsc-ready.yaml
   # MCP catalog: Technology Preview, needs OpenShift 4.22+. The DSC component
@@ -65,6 +72,16 @@ policies:
       - name: policy-openshift-ai-dsc
     manifests:
       - path: manifests/mcp-catalog
+  # Gen AI studio (AI asset endpoints, Playground): Technology Preview, dashboard flag; the
+  # Playground also needs the ogx component.
+  - name: policy-openshift-ai-genai-studio
+    placement:
+      placementPath: placement-openshift-ai-genai-studio.yaml
+    consolidateManifests: false
+    dependencies:
+      - name: policy-openshift-ai-dsc
+    manifests:
+      - path: manifests/genai-studio
   # Agents catalog: Developer Preview, dashboard flag only.
   - name: policy-openshift-ai-agents-cat
     placement:
