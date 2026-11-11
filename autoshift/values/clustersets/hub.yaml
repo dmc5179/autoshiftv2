@@ -419,6 +419,10 @@ hubClusterSets:
       # Authorino replica count (2) is config.connectivity-link.authorino.replicas above.
       rhcl-ha: 'true'
       rhcl-limitador-storage: 'disk'
+      # Explicit empty value deletes the label from the ManagedCluster; omitting it would leave it.
+      # Authorino replicas moved to config.connectivity-link.authorino.replicas. Drop this line once
+      # the label is gone from local-cluster.
+      rhcl-authorino-replicas: ''
       # Connectivity Link 1.5. The RHOAI 3.5 MaaS documentation (s1.2) still names
       # 1.4.x; 1.5 is a deliberate choice here. Its controller memory bug is handled
       # by the Subscription override in the connectivity-link policy (CONNLINK-1878).
