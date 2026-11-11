@@ -521,7 +521,9 @@ hubClusterSets:
       # This hub runs team Argo CD agent principals. Which teams get one is decided by
       # config.gitops.teams.<team>.agent.enabled; this only places the policy.
       gitops-agent-teams: 'false'
-      gitops-agent: 'true'
+      # Upstream's hub profile turns the infra agent on (#252). Held off here so that syncing with
+      # upstream changes nothing on sandbox141; turning it on is a separate decision.
+      gitops-agent: 'false'
       ### AutoShift Console Plugin
       autoshift-console: 'false'  # AutoShift section in the Fleet management perspective
       ### Advanced Cluster Management
