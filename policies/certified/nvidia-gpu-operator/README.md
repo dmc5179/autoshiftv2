@@ -9,7 +9,7 @@ directory is under `policies/certified/` because the Operator ships in `certifie
 | Policy | Mode | What it does |
 |---|---|---|
 | `policy-nvidia-gpu-operator-install` | enforce | The `nvidia-gpu-operator` namespace, an OwnNamespace OperatorGroup and the `gpu-operator-certified` subscription |
-| `policy-nvidia-gpu-cluster-policy` | enforce | `ClusterPolicy` `gpu-cluster-policy`: driver, container toolkit, device plugin, DCGM, GPU feature discovery. Waits for the Operator |
+| `policy-nvidia-gpu-cluster-policy` | enforce | `ClusterPolicy` `gpu-cluster-policy`: driver, container toolkit, device plugin, DCGM, GPU feature discovery, with `config.nvidia-gpu-operator.clusterPolicy` merged over the base. Waits for the Operator |
 | `policy-nvidia-gpu-ready` | inform | The `ClusterPolicy` reports `Ready` |
 
 ## Enabling
@@ -38,17 +38,41 @@ default configuration, which labels PCI devices by vendor. Enable both. A `worke
 `config.nodeFeatureDiscovery` that drops `deviceLabelFields: [vendor]` leaves the Operator with no
 nodes to manage and no error.
 
+## Configuration
+
+The `ClusterPolicy` spec is read from `config.nvidia-gpu-operator.clusterPolicy`, the same key the
+version pin uses, and merged over the base in `manifests/cluster-policy/cluster-policy.yaml`. Maps
+merge key by key and the configured value wins; lists replace the base whole. A field removed from
+config returns to the base.
+
+```yaml
+hubClusterSets:
+  hub:
+    config:
+      nvidia-gpu-operator:
+        clusterPolicy:
+          mig:
+            strategy: mixed
+          driver:
+            upgradePolicy:
+              maxParallelUpgrades: 2
+```
+
+Because config is per clusterset and per cluster, clusters with different GPU hardware can carry
+different settings. Fields set through config must exist in the installed CRD too, as the next
+section explains.
+
 ## The ClusterPolicy matches the channel
 
 The API server rejects the whole `ClusterPolicy` on the first field its CRD does not define, with
 `strict decoding error: unknown field "spec.<x>"`. The policy then reports the resource as
 "missing, and cannot be created", which reads like a permissions or ordering problem rather than a
-schema mismatch. Every field in `manifests/cluster-policy/cluster-policy.yaml` exists in the CRD that
-the default channel, `v25.3`, installs. Five fields from newer releases are left out for that reason:
+schema mismatch. Every field in the base spec exists in the CRD that the default channel, `v25.3`,
+installs. Five fields from newer releases are left out for that reason:
 `spec.cdi.nriPluginEnabled`, `spec.sandboxWorkloads.mode`, `spec.driver.licensingConfig.secretName`,
 `spec.mps` and `spec.kataSandboxDevicePlugin`.
 
-**When you change the channel, check the manifest against the new CRD**, for example with a
+**When you change the channel or add config, check the result against the CRD**, for example with a
 server-side dry run:
 
 ```bash
@@ -78,8 +102,8 @@ schedulable and reports no `nvidia.com/gpu` capacity, so GPU workloads stay `Pen
 obvious cause. `policy-nvidia-gpu-ready` asserts the `ClusterPolicy` `Ready` condition, which spans
 the whole stack and names the component that is stuck.
 
-GPU nodes themselves come from the cluster. On AWS, the [gpu-nodes](../../stable/gpu-nodes/README.md)
-policy creates GPU MachineSets.
+GPU nodes themselves come from the cluster, from MachineSets or bare-metal hosts that carry an NVIDIA
+GPU.
 
 ## Verifying
 

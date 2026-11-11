@@ -52,7 +52,16 @@ policies:
   # how you see it finish, or see which component failed.
   - name: policy-nvidia-gpu-ready
     remediationAction: inform
+    consolidateManifests: false
     dependencies:
       - name: policy-nvidia-gpu-cluster-policy
+    customMessage:
+      noncompliant: >-
+        The NVIDIA ClusterPolicy gpu-cluster-policy is not Ready. The driver build takes about 15
+        minutes on a new GPU node. After that, check the ClusterPolicy status, which names the
+        component that is not ready, and the pods in nvidia-gpu-operator. Common causes are a
+        driver that cannot build for the node's kernel, an image the cluster cannot pull (mirror
+        nvcr.io on a disconnected cluster), and a config.nvidia-gpu-operator.clusterPolicy field
+        the installed ClusterPolicy CRD does not define.
     manifests:
       - path: test/gpu-stack-ready.yaml

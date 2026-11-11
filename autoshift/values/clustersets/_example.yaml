@@ -1600,6 +1600,32 @@ hubClusterSets:
       #         deviceTypes: [disk]
       #         deviceMechanicalProperties: [NonRotational]
       # =======================================================================
+      # LeaderWorkerSet. Requires the leader-worker-set label.
+      # =======================================================================
+      # LeaderWorkerSetOperator spec. Any spec field is accepted, merged over a base of
+      # managementState Managed and both log levels Normal. Name only what you change.
+      # Same key as the version pin (config.leader-worker-set.versions).
+      # Log levels: Normal, Debug, Trace, TraceAll.
+      leader-worker-set:
+        operator:
+          logLevel: Normal
+          operatorLogLevel: Normal
+      # =======================================================================
+      # NVIDIA GPU Operator. Requires the nvidia-gpu-operator label.
+      # =======================================================================
+      # Same key as the version pin (config.nvidia-gpu-operator.versions). clusterPolicy is merged
+      # over the policy's base ClusterPolicy spec: maps merge key by key and these values win,
+      # lists replace the default whole. Name only what you change. Every field must exist in the
+      # ClusterPolicy CRD of the installed channel; the API server rejects the whole object on
+      # the first unknown field.
+      nvidia-gpu-operator:
+        clusterPolicy:
+          mig:
+            strategy: single
+          dcgmExporter:
+            serviceMonitor:
+              enabled: true
+      # =======================================================================
       # Workload Partitioning (CPU isolation via PerformanceProfile)
       # =======================================================================
       workloadPartitioning:
