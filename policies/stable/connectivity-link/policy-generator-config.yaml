@@ -94,8 +94,8 @@ policies:
       - path: test/rhcl-ha-ready.yaml
         customMessage:
           noncompliant: >
-            ❌ Authorino or Limitador is not available with the HA settings.
+            Authorino or Limitador is not available with the HA settings.
             Check the Authorino replica count against
-            autoshift.io/rhcl-authorino-replicas, and whether Limitador's
+            config.connectivity-link.authorino.replicas, and whether Limitador's
             disk PVC bound: oc get pvc,pods -n kuadrant-system
 

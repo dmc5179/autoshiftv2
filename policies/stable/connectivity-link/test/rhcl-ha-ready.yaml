@@ -1,6 +1,8 @@
 # Is the HA configuration in effect? Authorino runs the requested replicas, and Limitador came back
 # available on disk storage.
 object-templates-raw: |
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: apps/v1
@@ -9,7 +11,7 @@ object-templates-raw: |
         name: authorino
         namespace: kuadrant-system
       status:
-        availableReplicas: '{{hub (index .ManagedClusterLabels "autoshift.io/rhcl-authorino-replicas" | default "1") | toLiteral hub}}'
+        availableReplicas: {{hub printf "%v" (dig "connectivity-link" "authorino" "replicas" 1 $cfg) hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: apps/v1

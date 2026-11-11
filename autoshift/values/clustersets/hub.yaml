@@ -65,6 +65,11 @@ hubClusterSets:
       # 16 / 64) + up to 2 GPU nodes (g6.xlarge, 4 / 16) = 11 nodes, 128
       # cores, 512 GiB. Workers 3-6, GPU 1-2 (nvidia-l4, the accelerator
       # gpu-nodes derives for g6).
+      # Connectivity Link specs, merged over the policy's base. Two Authorino replicas for
+      # policy-rhcl-ha (formerly the rhcl-authorino-replicas label).
+      connectivity-link:
+        authorino:
+          replicas: 2
       clusterAutoscaler:
         resourceLimits:
           maxNodesTotal: 12
@@ -410,9 +415,9 @@ hubClusterSets:
       # reports Compliant — enabled, and silently doing nothing.
       leader-worker-set: 'true'
       connectivity-link: 'true'
-      # Authorino x2 with a disruption budget, Limitador counters on disk (policy-rhcl-ha).
+      # Authorino disruption budget and Limitador counters on disk (policy-rhcl-ha). The
+      # Authorino replica count (2) is config.connectivity-link.authorino.replicas above.
       rhcl-ha: 'true'
-      rhcl-authorino-replicas: '2'
       rhcl-limitador-storage: 'disk'
       # Connectivity Link 1.5. The RHOAI 3.5 MaaS documentation (s1.2) still names
       # 1.4.x; 1.5 is a deliberate choice here. Its controller memory bug is handled

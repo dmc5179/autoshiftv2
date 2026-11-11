@@ -1626,6 +1626,22 @@ hubClusterSets:
             serviceMonitor:
               enabled: true
       # =======================================================================
+      # Connectivity Link. Requires the connectivity-link label.
+      # =======================================================================
+      # Same key as the version pin (config.connectivity-link.versions). Each block is merged
+      # over the policy's base spec: maps merge key by key and these values win. Name only
+      # what you change.
+      connectivity-link:
+        # Authorino spec. Base: clusterWide true, replicas 1, oidcServer TLS off. Any spec
+        # field except listener.tls, which follows the service-ca certificate.
+        authorino:
+          replicas: 2               # 2 or more with rhcl-ha
+          logLevel: info
+        # Kuadrant spec. Base: observability.enable true.
+        kuadrant:
+          observability:
+            enable: true
+      # =======================================================================
       # Workload Partitioning (CPU isolation via PerformanceProfile)
       # =======================================================================
       workloadPartitioning:
@@ -3094,10 +3110,9 @@ hubClusterSets:
       # =======================================================================
       connectivity-link: 'false'
       # Authorino and Limitador resilience (policy-rhcl-ha): an Authorino disruption budget and
-      # Limitador counters on disk. rhcl-authorino-replicas also sets Authorino's count without
-      # rhcl-ha (default 1); with rhcl-ha it must be 2 or more. Only disk storage is implemented.
+      # Limitador counters on disk. Needs config.connectivity-link.authorino.replicas of 2 or
+      # more. Only disk storage is implemented.
       rhcl-ha: 'true'
-      rhcl-authorino-replicas: '2'
       rhcl-limitador-storage: 'disk'
       connectivity-link-subscription-name: rhcl-operator
       connectivity-link-channel: stable

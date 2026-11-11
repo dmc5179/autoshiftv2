@@ -294,10 +294,9 @@ clusters:
       # =======================================================================
       connectivity-link: 'false'
       # Authorino and Limitador resilience (policy-rhcl-ha): an Authorino disruption budget and
-      # Limitador counters on disk. rhcl-authorino-replicas also sets Authorino's count without
-      # rhcl-ha (default 1); with rhcl-ha it must be 2 or more. Only disk storage is implemented.
+      # Limitador counters on disk. Needs config.connectivity-link.authorino.replicas of 2 or
+      # more. Only disk storage is implemented.
       rhcl-ha: 'true'
-      rhcl-authorino-replicas: '2'
       rhcl-limitador-storage: 'disk'
       connectivity-link-subscription-name: rhcl-operator
       connectivity-link-channel: stable

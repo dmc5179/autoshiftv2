@@ -2,7 +2,7 @@
 # Authorino checks the API key, Limitador counts tokens and requests.
 #
 # Authorino: its replica count is set in manifests/kuadrant/authorino.yaml from
-# autoshift.io/rhcl-authorino-replicas; this adds the PodDisruptionBudget and refuses fewer than
+# config.connectivity-link.authorino.replicas; this adds the PodDisruptionBudget and refuses fewer than
 # 2 replicas, because a budget over one pod blocks every drain.
 #
 # Limitador: in-memory counters reset whenever it restarts, which hands every user a fresh token
@@ -12,8 +12,10 @@
 # section 1.7), which this does not set up. Only spec.storage is set; the Kuadrant operator owns
 # the rest of the Limitador object.
 object-templates-raw: |
-  {{hub- $authorino := (index .ManagedClusterLabels "autoshift.io/rhcl-authorino-replicas" | default "1") hub}}
-  {{hub- if not (regexMatch "^([2-9]|[1-9][0-9]+)$" $authorino) hub}}{{hub fail (printf "rhcl-ha: autoshift.io/rhcl-authorino-replicas is %s; set it to 2 or more with rhcl-ha, since a disruption budget over a single replica blocks every node drain" $authorino) hub}}{{hub- end hub}}
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
+  {{hub- $authorino := (printf "%v" (dig "connectivity-link" "authorino" "replicas" 1 $cfg)) hub}}
+  {{hub- if not (regexMatch "^([2-9]|[1-9][0-9]+)$" $authorino) hub}}{{hub fail (printf "rhcl-ha: config.connectivity-link.authorino.replicas is %s; set it to 2 or more with rhcl-ha, since a disruption budget over a single replica blocks every node drain" $authorino) hub}}{{hub- end hub}}
   {{hub- $storage := (index .ManagedClusterLabels "autoshift.io/rhcl-limitador-storage" | default "disk") hub}}
   {{hub- if ne $storage "disk" hub}}{{hub fail (printf "rhcl-ha: autoshift.io/rhcl-limitador-storage %s is not supported; only disk is implemented" $storage) hub}}{{hub- end hub}}
   - complianceType: musthave
