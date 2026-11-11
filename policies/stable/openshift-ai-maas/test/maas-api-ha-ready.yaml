@@ -1,0 +1,16 @@
+# Did maas-controller act on the annotation? The Deployment it renders reports as many available
+# replicas as were asked for. A count that stays at 1 means the annotation was not read: check
+# the RHOAI version (the annotation is 3.5 and later) and the maas-controller log.
+object-templates-raw: |
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
+  {{hub- $replicas := (printf "%v" (dig "openshift-ai-maas" "maasApi" "replicas" 2 $cfg)) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: maas-api
+        namespace: redhat-ai-gateway-infra
+      status:
+        availableReplicas: '{{hub $replicas | toLiteral hub}}'

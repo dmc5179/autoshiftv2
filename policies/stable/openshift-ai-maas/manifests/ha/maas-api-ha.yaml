@@ -1,0 +1,40 @@
+# maas-api with more than one replica, and a PodDisruptionBudget so a node drain (a MachineConfig
+# rollout, an upgrade, a cluster autoscaler scale-down) never takes the last one away.
+#
+# maas-controller renders the maas-api Deployment and resets a direct `oc scale` or an HPA within
+# minutes. From RHOAI 3.5 the supported way is the maas.opendatahub.io/maas-api-replicas annotation
+# on the MaasTenantConfig, which the controller reads when it renders the Deployment (Red Hat
+# solution 7147427). This sets only that annotation; policy-maas-telemetry sets spec.telemetry on
+# the same object, and musthave merges the two without either owning the other's fields.
+#
+# The count comes from config.openshift-ai-maas.maasApi.replicas (default 2). Fewer than 2 is
+# refused: a PodDisruptionBudget with minAvailable 1 over a single pod blocks every drain.
+object-templates-raw: |
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
+  {{hub- $replicas := (printf "%v" (dig "openshift-ai-maas" "maasApi" "replicas" 2 $cfg)) hub}}
+  {{hub- if not (regexMatch "^([2-9]|[1-9][0-9]+)$" $replicas) hub}}{{hub fail (printf "openshift-ai-maas-ha: config.openshift-ai-maas.maasApi.replicas %s must be a whole number of 2 or more; a disruption budget over a single replica blocks every node drain" $replicas) hub}}{{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaasTenantConfig
+      metadata:
+        name: default-tenant
+        namespace: models-as-a-service
+        annotations:
+          maas.opendatahub.io/maas-api-replicas: '{{hub $replicas hub}}'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: maas-api
+        namespace: redhat-ai-gateway-infra
+      spec:
+        minAvailable: 1
+        selector:
+          matchLabels:
+            # tenant-instance, not just name and component: the maas-api-key-cleanup CronJob's
+            # pods carry those two as well, and would otherwise count as expected pods.
+            app.kubernetes.io/name: maas-api
+            maas.opendatahub.io/tenant-instance: maas-api

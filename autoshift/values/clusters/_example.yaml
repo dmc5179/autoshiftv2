@@ -282,3 +282,6 @@ clusters:
       openshift-ai-maas: 'false'
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra
       openshift-ai-maas-db-secret: maas-db-config
+      # Opt-in extras. Settings in config.openshift-ai-maas (telemetry, maasApi.replicas).
+      openshift-ai-maas-telemetry: 'true'     # MaaS usage telemetry (Technology Preview)
+      openshift-ai-maas-ha: 'true'            # maas-api replicas plus a PodDisruptionBudget

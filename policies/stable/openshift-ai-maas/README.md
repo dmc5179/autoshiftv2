@@ -19,6 +19,10 @@ Deploying a model behind the gateway is [openshift-ai-models](../openshift-ai-mo
 | `policy-openshift-ai-maas-dsc` | enforce | `aigateway.modelsAsAService.managementState: Managed` in the `default-dsc` `DataScienceCluster`. Waits for `policy-openshift-ai-dsc` |
 | `policy-openshift-ai-maas-ready` | inform | The Gateway reports `Programmed=True` |
 | `policy-openshift-ai-maas-db` | inform | The maas-api database Secret exists, and the `maas-api` Deployment is `Available` |
+| `policy-maas-telemetry` | enforce | Opt-in. Turns on MaaS telemetry in `MaasTenantConfig` `default-tenant`, so the Limitador token and request counters carry subscription and model labels. See [Telemetry](#telemetry) |
+| `policy-maas-api-ha` | enforce | Opt-in. Runs `maas-api` with `config.openshift-ai-maas.maasApi.replicas` replicas (default 2) and adds a PodDisruptionBudget. See [High availability](#high-availability) |
+| `policy-maas-api-ha-ready` | inform | `maas-api` reports the requested number of available replicas |
+| `policy-maas-telemetry-ready` | inform | The objects telemetry produces exist: the `maas-telemetry` TelemetryPolicy, the `latency-per-subscription` Telemetry, and the Limitador PodMonitor |
 
 ## Enabling
 
@@ -37,6 +41,8 @@ hubClusterSets:
 | `openshift-ai-maas` | | Enables these policies. Turning it off stops them managing anything and removes nothing |
 | `openshift-ai-maas-db-namespace` | `redhat-ai-gateway-infra` | Namespace of `maas-api` and its database Secret. On Red Hat OpenShift AI 3.4 this was `redhat-ods-applications` |
 | `openshift-ai-maas-db-secret` | `maas-db-config` | Name of the database Secret |
+| `openshift-ai-maas-telemetry` | | Opt-in MaaS telemetry; settings in `config.openshift-ai-maas.telemetry`. See [Telemetry](#telemetry) |
+| `openshift-ai-maas-ha` | | Opt-in `maas-api` high availability; replica count in `config.openshift-ai-maas.maasApi.replicas`. See [High availability](#high-availability) |
 
 Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
@@ -112,6 +118,54 @@ Any PostgreSQL that maas-api can reach works: a managed cloud database, or one i
 The `maas-api` check matters separately from the Gateway check. Serving and governance are separate
 paths through the same gateway: with maas-api down, a model keeps answering requests made with an
 existing key, while API key issuance, the model listing and subscription enforcement stop.
+
+## Telemetry
+
+Label `autoshift.io/openshift-ai-maas-telemetry: 'true'` turns on MaaS telemetry, the
+prerequisite for the MaaS usage dashboard and for any per-subscription query of token use. It is
+a Technology Preview feature, and the numbers are for showback, not billing.
+
+Two things differ from the RHOAI 3.5 documentation. The documentation says to patch a `Tenant`;
+on 3.5.2 the live object is `MaasTenantConfig` `default-tenant`, and a policy aimed at `Tenant`
+would create an unused object and still report Compliant. And `enabled` has to be set
+explicitly: maas-controller creates `default-tenant` with an empty spec, so the CRD default never
+applies.
+
+The telemetry spec is read from `config.openshift-ai-maas.telemetry` and merged over a base with
+organization and model usage on and per-user and per-group labels off. Per-user and per-group labels
+put user names into metrics and add one series per user and model, so turn them on deliberately:
+
+```yaml
+config:
+  openshift-ai-maas:
+    telemetry:
+      metrics:
+        captureUser: true
+        captureGroup: false
+```
+
+`enabled` stays `true` whatever config says; remove the label to stop managing telemetry.
+
+A policy cannot run a Prometheus query, so `policy-maas-telemetry-ready` only shows that the
+objects exist. To confirm the counters carry the new labels, query the platform Prometheus for
+`count by (subscription) (authorized_hits)` after some MaaS traffic.
+
+## High availability
+
+Label `autoshift.io/openshift-ai-maas-ha: 'true'` runs `maas-api` with more than one replica, so
+a node drain (a MachineConfig rollout, an upgrade, a cluster autoscaler scale-down) does not stop
+API key issuance and model listing.
+
+maas-controller renders the `maas-api` Deployment and resets a direct `oc scale` or an HPA within
+minutes. From RHOAI 3.5 the supported way is the `maas.opendatahub.io/maas-api-replicas`
+annotation on `MaasTenantConfig` `default-tenant`, which the controller reads when it renders the
+Deployment (Red Hat solution 7147427). The policy sets only that annotation, plus a
+PodDisruptionBudget with `minAvailable: 1`. The count comes from
+`config.openshift-ai-maas.maasApi.replicas` (default 2) and must be 2 or more, because a budget
+over a single pod blocks every drain; anything else fails the policy with a message.
+
+This covers `maas-api` only. Authorino's replica count is
+`config.connectivity-link.authorino.replicas`, in the connectivity-link policy.
 
 ## Dependencies
 

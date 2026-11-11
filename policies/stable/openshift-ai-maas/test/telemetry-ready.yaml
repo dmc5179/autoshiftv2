@@ -1,0 +1,33 @@
+# Did turning telemetry on take effect? Each object here is one that maas-controller, Kuadrant or
+# the monitoring stack creates in response, so Compliant means the chain reacted, not only that
+# the spec was written. It cannot show that metrics actually flow: a ConfigurationPolicy cannot
+# run PromQL. scripts/checkup.sh in rhoai-mass-aws runs that query.
+#
+# This depends on policy-maas-telemetry, because a ConfigurationPolicy naming a CRD that does not
+# exist yet reports Compliant.
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaasTenantConfig
+metadata:
+  name: default-tenant
+  namespace: models-as-a-service
+spec:
+  telemetry:
+    enabled: true
+---
+apiVersion: extensions.kuadrant.io/v1alpha1
+kind: TelemetryPolicy
+metadata:
+  name: maas-telemetry
+  namespace: openshift-ingress
+---
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: latency-per-subscription
+  namespace: openshift-ingress
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kuadrant-limitador-monitor
+  namespace: kuadrant-system

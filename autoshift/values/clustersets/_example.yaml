@@ -1291,6 +1291,19 @@ hubClusterSets:
           monitoring:
             managementState: Managed
       # =======================================================================
+      # Models-as-a-Service. Requires the openshift-ai-maas label.
+      # =======================================================================
+      openshift-ai-maas:
+        # MaasTenantConfig spec.telemetry, merged over a base of organization and model usage on,
+        # per-user and per-group labels off. Needs the openshift-ai-maas-telemetry label.
+        telemetry:
+          metrics:
+            captureUser: false
+            captureGroup: false
+        # maas-api replica count, 2 or more. Needs the openshift-ai-maas-ha label.
+        maasApi:
+          replicas: 2
+      # =======================================================================
       # Workload Partitioning (CPU isolation via PerformanceProfile)
       # =======================================================================
       workloadPartitioning:
@@ -2722,3 +2735,6 @@ hubClusterSets:
       # password), so these only say where to look for it, never what is in it.
       openshift-ai-maas-db-namespace: redhat-ai-gateway-infra   # redhat-ods-applications on RHOAI 3.4
       openshift-ai-maas-db-secret: maas-db-config
+      # Opt-in extras. Settings in config.openshift-ai-maas (telemetry, maasApi.replicas).
+      openshift-ai-maas-telemetry: 'true'     # MaaS usage telemetry (Technology Preview)
+      openshift-ai-maas-ha: 'true'            # maas-api replicas plus a PodDisruptionBudget

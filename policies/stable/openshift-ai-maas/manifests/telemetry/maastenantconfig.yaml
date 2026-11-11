@@ -1,0 +1,38 @@
+# MaaS telemetry: subscription and model labels on the Limitador token and request counters, which
+# is what the MaaS usage dashboard and any per-subscription PromQL need.
+#
+# The RHOAI 3.5 docs (Govern LLM access with MaaS, section 1.18.3) say to patch a `Tenant`. On
+# 3.5.2 that CRD has no instances; the live object is this MaasTenantConfig, which maas-controller
+# creates. A policy written from the docs would create an unused Tenant and report Compliant.
+#
+# `enabled` is set explicitly: maas-controller creates default-tenant with `spec: {}`, and the
+# CRD's default for `enabled` only applies when `telemetry` itself is present.
+#
+# The telemetry spec is this base with config.openshift-ai-maas.telemetry merged over it (maps merge
+# key by key and config wins). Per-user and per-group labels are off in the base: they put user names
+# into metrics, and one series per user and model is the cardinality to watch on a loaded hub.
+# `enabled` stays true whatever config says, since this policy exists to turn telemetry on; switch
+# it off by removing the openshift-ai-maas-telemetry label.
+object-templates-raw: |
+  {{hub- $cm := (lookup "v1" "ConfigMap" .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName)) | default dict hub}}
+  {{hub- $cfg := (index (index $cm "data" | default dict) "config" | default "" | fromYaml | default dict) hub}}
+  {{hub- $tel := (`
+  enabled: true
+  metrics:
+    captureOrganization: true
+    captureModelUsage: true
+    captureUser: false
+    captureGroup: false
+  ` | fromYaml) hub}}
+  {{hub- $tel = (mergeOverwrite $tel (dig "openshift-ai-maas" "telemetry" (dict) $cfg)) hub}}
+  {{hub- $_ := set $tel "enabled" true hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: maas.opendatahub.io/v1alpha1
+      kind: MaasTenantConfig
+      metadata:
+        name: default-tenant
+        namespace: models-as-a-service
+      spec:
+        telemetry:
+          {{hub $tel | toYaml | autoindent hub}}
