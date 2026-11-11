@@ -1,0 +1,16 @@
+# Shows Gen AI studio -> AI asset endpoints and Playground in the dashboard. Technology Preview
+# in RHOAI 3.5, off by default: without it the Gen AI studio menu shows only API keys (from
+# modelAsService, which defaults on). The Playground item also needs the OGX operator, the ogx
+# component of the DataScienceCluster. (Configure user access, storage, and telemetry in
+# OpenShift AI 3.5, section 2.3, Dashboard configuration options.)
+#
+# OdhDashboardConfig is a cluster singleton holding every dashboard setting; musthave merges, so
+# this sets only its own flag.
+apiVersion: opendatahub.io/v1alpha
+kind: OdhDashboardConfig
+metadata:
+  name: odh-dashboard-config
+  namespace: redhat-ods-applications
+spec:
+  dashboardConfig:
+    genAiStudio: true

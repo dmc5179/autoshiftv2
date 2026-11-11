@@ -1271,6 +1271,26 @@ hubClusterSets:
       #         deviceTypes: [disk]
       #         deviceMechanicalProperties: [NonRotational]
       # =======================================================================
+      # Red Hat OpenShift AI. Requires the openshift-ai label.
+      # =======================================================================
+      # Same key as the version pin (config.openshift-ai.versions). Each block is merged over the
+      # policy's base spec: maps merge key by key and these values win. Name only what you change.
+      openshift-ai:
+        # DataScienceCluster spec. Base: every component Managed except kueue, trainer and the
+        # deprecated llamastackoperator (Removed). llamastackoperator and
+        # aigateway.modelsAsAService cannot be set here (the openshift-ai-maas policy owns MaaS).
+        dataScienceCluster:
+          components:
+            kueue:
+              managementState: Removed
+            workbenches:
+              workbenchNamespace: rhods-notebooks
+        # DSCInitialization spec. Base: applications namespace redhat-ods-applications,
+        # monitoring Managed, trusted CA bundle Managed.
+        dscInitialization:
+          monitoring:
+            managementState: Managed
+      # =======================================================================
       # Workload Partitioning (CPU isolation via PerformanceProfile)
       # =======================================================================
       workloadPartitioning:
@@ -2688,3 +2708,4 @@ hubClusterSets:
       #                  the 3.5 release notes.
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
+      openshift-ai-genai-studio: 'false'      # Gen AI studio: AI asset endpoints and Playground (Technology Preview)

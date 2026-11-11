@@ -12,6 +12,7 @@ MCP and Agents catalogs in the AI hub.
 | `policy-openshift-ai-dsc` | enforce | `DSCInitialization` `default-dsci` and `DataScienceCluster` `default-dsc`. Waits for the Operator |
 | `policy-openshift-ai-ready` | inform | The `DataScienceCluster` reports `Ready` |
 | `policy-openshift-ai-mcp-catalog` | enforce | The `mcplifecycleoperator` component and the dashboard `mcpCatalog` flag. Opt-in |
+| `policy-openshift-ai-genai-studio` | enforce | The dashboard `genAiStudio` flag: Gen AI studio AI asset endpoints and Playground (Technology Preview). Opt-in |
 | `policy-openshift-ai-agents-cat` | enforce | The dashboard `agentsCatalog` flag. Opt-in |
 
 ## Enabling
@@ -28,6 +29,7 @@ hubClusterSets:
       # openshift-ai-version: 'rhods-operator.3.5.2'   # optional CSV pin
       openshift-ai-mcp-catalog: 'false'
       openshift-ai-agents-catalog: 'false'
+      openshift-ai-genai-studio: 'false'
 ```
 
 | Label | Meaning |
@@ -35,13 +37,15 @@ hubClusterSets:
 | `openshift-ai` and the standard operator labels | Install the Operator and create the platform |
 | `openshift-ai-mcp-catalog` | Enable the MCP catalog. Technology Preview; needs OpenShift 4.22 or later and the MCP Gateway, which Red Hat Connectivity Link 1.5 includes |
 | `openshift-ai-agents-catalog` | Enable the Agents catalog. Developer Preview |
+| `openshift-ai-genai-studio` | Enable Gen AI studio: AI asset endpoints and Playground. Technology Preview; the Playground also needs the `ogx` component |
 
 Set labels in values files only. The `cluster-labels` policy stamps them onto each cluster.
 
 ## The DataScienceCluster
 
-The component set is fixed in `manifests/dsc/datasciencecluster.yaml`. Two settings in it are not
-obvious from the CRD.
+The base component set is in `manifests/dsc/datasciencecluster.yaml`: every component `Managed`
+except `kueue` and `trainer`, which need Operators this policy does not install, and the deprecated
+`llamastackoperator`. Two settings in it are not obvious from the CRD.
 
 **`llamastackoperator` must be `Removed`.** It is deprecated in favor of `ogx`. Leaving it
 `Managed`, or unset on an existing `DataScienceCluster`, where it defaults to `Managed`, makes the
@@ -61,6 +65,34 @@ traces configuration. Populating it starts the Operator's observability stack (M
 ThanosQuerier, Perses, tracing), which needs the Tempo, OpenTelemetry and Cluster Observability
 Operators installed first. AutoShift has policies for all three. Enable those, then add the
 configuration.
+
+## Configuration
+
+The `DataScienceCluster` and `DSCInitialization` specs are read from `config.openshift-ai`, the same
+key the version pin uses, and merged over the base. Maps merge key by key, the configured value wins,
+and a field removed from config returns to the base.
+
+```yaml
+hubClusterSets:
+  hub:
+    config:
+      openshift-ai:
+        dataScienceCluster:
+          components:
+            kueue:
+              managementState: Managed     # once the Red Hat build of Kueue is installed
+            trustyai:
+              managementState: Removed
+        dscInitialization:
+          trustedCABundle:
+            customCABundle: |
+              -----BEGIN CERTIFICATE-----
+              ...
+```
+
+Two fields cannot be set this way, for the reasons in the previous section: `llamastackoperator`
+stays `Removed`, and `aigateway.modelsAsAService` is left to the openshift-ai-maas policy. A
+configured value for either is dropped.
 
 ## The catalogs
 
