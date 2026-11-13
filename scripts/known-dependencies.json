@@ -5,5 +5,8 @@
   ],
   "advanced-cluster-management": [
     "multicluster-engine"
+  ],
+  "rhods-operator": [
+    "openshift-cert-manager-operator"
   ]
 }

@@ -639,11 +639,17 @@ The file `scripts/known-dependencies.json` contains manual dependencies for oper
 
 ```json
 {
-  "odf-operator": ["odf-dependencies"]
+  "odf-operator": ["odf-dependencies"],
+  "advanced-cluster-management": ["multicluster-engine"],
+  "rhods-operator": ["openshift-cert-manager-operator"]
 }
 ```
 
 The script will recursively resolve `odf-dependencies` from the catalog to get the full dependency tree.
+
+`rhods-operator` (OpenShift AI) declares no `olm.package.required` dependencies, but the Operator
+requires cert-manager. The entry makes a mirror for an OpenShift AI cluster carry cert-manager even
+when the cert-manager policy is not enabled in the values used to build it.
 
 ---
 

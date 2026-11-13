@@ -123,6 +123,20 @@ The OpenShift AI Operator requires cert-manager, from the [cert-manager](../cert
 policy. Models-as-a-Service additionally needs [openshift-ai-maas](../openshift-ai-maas/README.md),
 Red Hat Connectivity Link and LeaderWorkerSet.
 
+## Disconnected
+
+The `rhods-operator` bundle declares no OLM dependencies, so oc-mirror and the ImageSetConfiguration
+generator only bring what the values enable or name. For an OpenShift AI mirror:
+
+- cert-manager: `scripts/known-dependencies.json` maps `rhods-operator` to
+  `openshift-cert-manager-operator`, so the generated ImageSetConfiguration includes it.
+- Models-as-a-Service: Red Hat Connectivity Link and LeaderWorkerSet come from their own policies'
+  labels, so enable those policies in the values the mirror is built from.
+- Gateway API: the cluster ingress operator installs OpenShift Service Mesh 3 at a pinned version
+  for the gateways that the dashboard and Models-as-a-Service use. See the Disconnected section of
+  [connectivity-link](../connectivity-link/README.md).
+- Model images, such as ModelCar OCI images, are in no operator catalog. Mirror them yourself.
+
 ## Verifying
 
 ```bash
