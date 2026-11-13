@@ -37,20 +37,27 @@ policies:
   - name: policy-ols-operator-install
     manifests:
       - path: manifests/operator-install
-  # The OLSConfig CRD arrives with the CSV, so this depends on the install.
-  # Also depends on MaaS: the provider URL points at the MaaS gateway, and
-  # pointing Lightspeed at an endpoint that does not exist yet just produces
-  # an assistant that errors on every question.
+  # The OLSConfig CRD arrives with the CSV, so this depends on the install. A
+  # ConfigurationPolicy naming a CRD that does not exist yet reports Compliant.
   - name: policy-ols-config
     consolidateManifests: false
     dependencies:
       - name: policy-ols-operator-install
+      # Fork-only (rhoai-maas): this hub points Lightspeed at the MaaS gateway, and an
+      # assistant whose provider does not exist yet errors on every question.
       - name: policy-openshift-ai-maas
     manifests:
       - path: manifests/olsconfig
   - name: policy-ols-ready
     remediationAction: inform
+    consolidateManifests: false
     dependencies:
       - name: policy-ols-config
+    customMessage:
+      noncompliant: >-
+        The OpenShift Lightspeed app server (lightspeed-app-server in openshift-lightspeed) is not
+        Available. Check the OLSConfig status and the operator logs. Common causes are a provider
+        credentials Secret that is missing or lacks the apitoken key, a provider url or model the
+        provider does not serve, and a config.openshift-lightspeed field the OLSConfig CRD rejects.
     manifests:
       - path: test/ols-ready.yaml

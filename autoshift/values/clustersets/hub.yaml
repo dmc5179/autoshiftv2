@@ -24,9 +24,18 @@ hubClusterSets:
         # one key, so they share its owner's tokenRateLimit.
         maas:
           model: 'granite-4-tiny-gpu'
-      openshiftLightspeed:
+      # Read by the upstream openshift-lightspeed policy (auto-shift/autoshiftv2 #331), which
+      # replaced the fork's MaaS-only config.openshiftLightspeed. The provider is the MaaS
+      # gateway on this cluster: https://maas.<ingress domain>/v1. The provider name stays
+      # maas, as the fork's policy named it, so the OLSConfig provider does not change.
+      openshift-lightspeed:
+        provider:
+          name: 'maas'
+          type: 'rhoai_vllm'
+          ingressHost: 'maas'
+          path: '/v1'
+          secretName: 'maas-api-key'
         model: 'publishers/llm/models/granite-4-tiny-gpu'
-        secretName: 'maas-api-key'
         # Offline Red Hat docs, DIRECT to the knowledge bridge for now: the shared MCP
         # gateway is blocked (its controller crash-loops at its shipped limits). The
         # bridge has no auth, so no headers; its NetworkPolicy admits only
@@ -460,7 +469,7 @@ hubClusterSets:
       # Stage 1 only; see docs/model-egress-rollout.md in rhoai-mass-quickstart.
       model-egress: 'true'
       # OpenShift Lightspeed, answering from the MaaS model in
-      # config.openshiftLightspeed. Needs the maas-api-key Secret in
+      # config.openshift-lightspeed. Needs the maas-api-key Secret in
       # openshift-lightspeed, created out of band with a minted MaaS key.
       # Use this policy OR scripts/40-lightspeed.sh, not both.
       openshift-lightspeed: 'true'

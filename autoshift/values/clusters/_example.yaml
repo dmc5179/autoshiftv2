@@ -159,6 +159,7 @@ clusters:
       mtv: 'true'
       node-feature-discovery: 'true'
       sriov: 'true'
+      openshift-lightspeed: 'true'
       # Federation mesh membership: every cluster carrying the same value trusts the others.
       ztwim-federation-mesh: 'mesh-a'
 
@@ -351,16 +352,13 @@ clusters:
       # =======================================================================
       openshift-ai-models: 'false'
       # =======================================================================
-      # Openshift Lightspeed
+      # Openshift Lightspeed (enabled above, in the sample cluster's labels)
       # =======================================================================
-      openshift-lightspeed: 'false'
       openshift-lightspeed-subscription-name: lightspeed-operator
       openshift-lightspeed-channel: stable
       openshift-lightspeed-source: redhat-operators
       openshift-lightspeed-source-namespace: openshift-marketplace
       openshift-lightspeed-version: ''
-      # The model and the API key Secret are config.openshiftLightspeed, not
-      # labels: a MaaS model id contains slashes, which a label value cannot.
 
       # =======================================================================
       # Agent sandboxing (OpenShell prerequisites)
