@@ -347,6 +347,7 @@ hubClusterSets:
               - maas-user
               - danclark
               - ojoseph
+              - grenner
             namespaceRoles:
               - namespace: llm
                 role: view
@@ -354,6 +355,7 @@ hubClusterSets:
             users:
               - danclark
               - ojoseph
+              - grenner
             clusterRoles:
               - cluster-admin
           # OpenShift AI administrators: the dashboard's admin group (Auth CR adminGroups).
@@ -361,6 +363,7 @@ hubClusterSets:
             users:
               - danclark
               - ojoseph
+              - grenner
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
