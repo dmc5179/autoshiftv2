@@ -348,6 +348,7 @@ hubClusterSets:
               - danclark
               - ojoseph
               - grenner
+              - vreynold
             namespaceRoles:
               - namespace: llm
                 role: view
@@ -356,6 +357,7 @@ hubClusterSets:
               - danclark
               - ojoseph
               - grenner
+              - vreynold
             clusterRoles:
               - cluster-admin
           # OpenShift AI administrators: the dashboard's admin group (Auth CR adminGroups).
@@ -364,6 +366,7 @@ hubClusterSets:
               - danclark
               - ojoseph
               - grenner
+              - vreynold
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
@@ -462,7 +465,7 @@ hubClusterSets:
 
       openshift-ai-maas: 'true'
       # MaaS telemetry (policy-maas-telemetry). No per-user or per-group labels.
-      openshift-ai-maas-telemetry: 'true'
+      openshift-ai-maas-telemetry: 'false'
       openshift-ai-maas-telemetry-capture-user: 'false'
       openshift-ai-maas-telemetry-capture-group: 'false'
       # maas-api HA (policy-maas-api-ha): two replicas and a disruption budget.
@@ -784,7 +787,7 @@ hubClusterSets:
       acs-source: redhat-operators
       acs-source-namespace: openshift-marketplace
       ### Developer Spaces
-      dev-spaces: 'false'
+      dev-spaces: 'true'
       dev-spaces-subscription-name: devspaces
       # dev-spaces-version: 'devspacesoperator.v3.31.3'
       dev-spaces-channel: stable
