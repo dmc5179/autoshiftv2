@@ -10,7 +10,7 @@ that stay underused are removed again.
 | Policy | Type | What it does |
 |---|---|---|
 | `policy-cluster-autoscaler` | enforce | The `ClusterAutoscaler` and the `MachineAutoscaler` objects |
-| `policy-cluster-autoscaler-ready` | inform | The `cluster-autoscaler-default` Deployment in `openshift-machine-api` is available |
+| `policy-cluster-autoscaler-ready` | inform | The `cluster-autoscaler-default` Deployment in `openshift-machine-api` is available, and every class in `machineSets` matches at least one machine set, each with its `MachineAutoscaler` |
 
 ## Labels
 
@@ -20,17 +20,26 @@ that stay underused are removed again.
 
 ## Configuration
 
-`config.clusterAutoscaler` in the values:
+`config.clusterAutoscaler` in the values holds the `ClusterAutoscaler` spec, plus one extra key,
+`machineSets`. Every key except `machineSets` is merged over a base spec, so any
+`ClusterAutoscaler` field can be set, for example `balanceSimilarNodeGroups`,
+`maxNodeProvisionTime`, `logVerbosity` or `expanders`. Maps merge key by key and the configured
+value wins.
 
 | Key | Required | Meaning |
 |---|---|---|
-| `resourceLimits` | yes | Copied into the `ClusterAutoscaler`: `maxNodesTotal`, `cores` and `memory` (GiB) `min`/`max`, optional `gpus` list of `{type, min, max}`. These are totals for the **whole** cluster, control plane included |
-| `scaleDown` | no | Merged over `enabled: true`, `delayAfterAdd: 10m`, `unneededTime: 10m`, `utilizationThreshold: "0.5"` |
-| `podPriorityThreshold` | no | Default `-10`. Pods below it never cause a scale-up |
+| `resourceLimits` | yes | `maxNodesTotal`, `cores` and `memory` (GiB) `min`/`max`, optional `gpus` list of `{type, min, max}`. These are totals for the **whole** cluster, control plane included |
+| `scaleDown` | no | Base: `enabled: true`, `delayAfterAdd: 10m`, `unneededTime: 10m`, `utilizationThreshold: "0.5"` |
+| `podPriorityThreshold` | no | Base: `-10`. Pods below it never cause a scale-up |
+| Any other `ClusterAutoscaler` spec field | no | Passed through, merged over the base |
 | `machineSets.<class>` | no | `{minReplicas, maxReplicas}` for each machine set of that class. A class with no entry gets no `MachineAutoscaler` |
 
 `resourceLimits.maxNodesTotal` is required on purpose: the policy refuses to turn on autoscaling
 without a ceiling on how far it can scale.
+
+The `ClusterAutoscaler` is enforced with `mustonlyhave`: its whole spec comes from this policy, so
+a list such as `resourceLimits.gpus` is replaced when the configuration changes, and an entry
+removed from the configuration is removed from the cluster.
 
 The `cores` and `memory` minimums matter for scale-down. The autoscaler never removes a node if
 doing so would take the cluster below them, so set them below what the smallest cluster you
@@ -54,6 +63,30 @@ zone.
 
 A machine set must have at least one machine when its `MachineAutoscaler` is first created.
 
+### Replica ownership with the node policies
+
+The `worker-nodes` and `infra-nodes` policies enforce `spec.replicas` on the machine sets they
+manage, and they name those machine sets `<infrastructure ID>-<role>-<zone>`, the same names the
+installer gives the default worker machine sets. A `MachineAutoscaler` on the same machine set
+changes `spec.replicas`, the node policy sets it back on its next evaluation, and the count flaps.
+
+Until the node policies stop enforcing the count on autoscaled machine sets, choose one owner
+per class: do not set `machineSets.worker` on a cluster that carries `autoshift.io/worker-nodes`,
+or `machineSets.infra` on a cluster with a nonzero `autoshift.io/infra-nodes`. A fixed count
+comes from the node policy, a range from this one. Storage machine sets are never autoscaled, so
+`storage-nodes` is unaffected.
+
+### Removing a class
+
+A class removed from `machineSets` stops getting new `MachineAutoscaler` objects, but with
+`pruneObjectBehavior: None` the existing ones stay and keep scaling their machine sets. Delete them
+by hand after removing the class, for example for `gpu`:
+
+```bash
+oc get machineautoscalers.autoscaling.openshift.io -n openshift-machine-api
+oc delete machineautoscalers.autoscaling.openshift.io <name> -n openshift-machine-api
+```
+
 ### GPU machine sets
 
 Autoscaling a GPU machine set needs two things from whatever creates it:
@@ -64,6 +97,10 @@ Autoscaling a GPU machine set needs two things from whatever creates it:
   that changes it fight each other, and the replica count flaps.
 
 Leave `machineSets.gpu` out until both hold.
+
+A class set in `machineSets` that matches no machine set, for example `gpu` before any GPU machine
+set exists, renders no `MachineAutoscaler`. The main policy stays Compliant, so
+`policy-cluster-autoscaler-ready` reports it instead and names the class.
 
 ## Example
 

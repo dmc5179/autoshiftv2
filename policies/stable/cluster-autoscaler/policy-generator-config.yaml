@@ -36,10 +36,22 @@ policies:
   - name: policy-cluster-autoscaler
     manifests:
       - path: manifests/cluster-autoscaler.yaml
-  # inform: the autoscaler Deployment the ClusterAutoscaler creates is running.
+  # inform: the autoscaler Deployment the ClusterAutoscaler creates is running, and every class
+  # configured in machineSets has MachineSets with MachineAutoscalers.
   - name: policy-cluster-autoscaler-ready
     remediationAction: inform
+    consolidateManifests: false
     dependencies:
       - name: policy-cluster-autoscaler
     manifests:
       - path: test/cluster-autoscaler-ready.yaml
+        customMessage:
+          noncompliant: >-
+            The cluster-autoscaler-default Deployment in openshift-machine-api is not available, so
+            nothing is autoscaled. Check the ClusterAutoscaler default and the machine-api-operator
+            logs; a resourceLimits value the API rejects is a common cause.
+      - path: test/machine-autoscalers-ready.yaml
+        # Surfaces the fail message (which names the class) rather than the template error
+        # wrapping it; a missing or different MachineAutoscaler shows the default message.
+        customMessage:
+          noncompliant: '{{ regexReplaceAll "(?s).*error calling fail: " .DefaultMessage "" | trim }}'

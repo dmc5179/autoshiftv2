@@ -1,14 +1,16 @@
 # The cluster autoscaler: one ClusterAutoscaler named `default`, with hard limits, and one
 # MachineAutoscaler per MachineSet of each class the cluster opts into.
 #
-# config.clusterAutoscaler:
-#   resourceLimits   REQUIRED. Copied into the ClusterAutoscaler as is: maxNodesTotal, cores and
-#                    memory (GiB) min/max, optional gpus [{type, min, max}]. Required so that
-#                    autoscaling never runs without a cost ceiling. Count the control plane: the
-#                    limits are cluster totals, not totals for autoscaled nodes.
-#   scaleDown        Optional, merged over: enabled true, delayAfterAdd 10m, unneededTime 10m,
-#                    utilizationThreshold "0.5".
-#   podPriorityThreshold  Optional, default -10. Pods below it never trigger a scale-up.
+# config.clusterAutoscaler holds the ClusterAutoscaler spec plus one extra key, machineSets.
+# Every key except machineSets is merged over a base spec (podPriorityThreshold -10; scaleDown
+# enabled true, delayAfterAdd 10m, unneededTime 10m, utilizationThreshold "0.5"), the same
+# base-plus-config shape as config.aap.instance. Maps merge key by key and config wins, so any
+# ClusterAutoscaler field can be set: balanceSimilarNodeGroups, maxNodeProvisionTime,
+# logVerbosity, expanders, and so on.
+#   resourceLimits   REQUIRED: maxNodesTotal, cores and memory (GiB) min/max, optional gpus
+#                    [{type, min, max}]. Required so that autoscaling never runs without a cost
+#                    ceiling. Count the control plane: the limits are cluster totals, not totals
+#                    for autoscaled nodes.
 #   machineSets      Per class, {minReplicas, maxReplicas}. A class that is absent gets no
 #                    MachineAutoscaler. Classes: worker, infra, gpu. The range applies to EACH
 #                    MachineSet of that class, so a cluster with a worker MachineSet per zone
@@ -22,17 +24,31 @@
 #   infra    machine role infra.
 #   worker   machine role worker.
 #
+# Replica ownership: the worker-nodes and infra-nodes policies enforce spec.replicas on the
+# MachineSets they manage (musthave), so a MachineAutoscaler on the same MachineSet is reset on
+# every evaluation and the count flaps. Do not set machineSets.worker on a cluster with the
+# worker-nodes label, or machineSets.infra with a nonzero infra-nodes label (see the README).
+#
 # GPU autoscaling needs two things from whatever owns the GPU MachineSet: a
 # cluster-api/accelerator label whose value matches resourceLimits.gpus[].type, and NOT
 # enforcing spec.replicas, or the owner and the autoscaler fight over the count.
+#
+# The ClusterAutoscaler is mustonlyhave: its whole spec comes from this policy, and lists such
+# as resourceLimits.gpus must be replaced, not merged with entries from an earlier config.
 object-templates-raw: |
   {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
   {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
   {{hub- $ca := (index $cfg "clusterAutoscaler" | default dict) hub}}
   {{hub- $limits := (index $ca "resourceLimits" | default dict) hub}}
   {{hub- if not (index $limits "maxNodesTotal") hub}}{{hub fail "cluster-autoscaler: config.clusterAutoscaler.resourceLimits.maxNodesTotal is required; autoscaling never runs without a ceiling" hub}}{{hub- end hub}}
-  {{hub- $scaleDown := (merge (index $ca "scaleDown" | default dict) (dict "enabled" true "delayAfterAdd" "10m" "unneededTime" "10m" "utilizationThreshold" "0.5")) hub}}
-  {{hub- $prio := (dig "podPriorityThreshold" -10 $ca) hub}}
+  {{hub- $spec := (`
+  podPriorityThreshold: -10
+  scaleDown:
+    enabled: true
+    delayAfterAdd: 10m
+    unneededTime: 10m
+    utilizationThreshold: "0.5"` | fromYaml) hub}}
+  {{hub- $spec = (mergeOverwrite $spec (omit $ca "machineSets")) hub}}
   {{hub- $sets := (index $ca "machineSets" | default dict) hub}}
   {{hub- range $class, $r := $sets hub}}
   {{hub- if not (has $class (list "worker" "infra" "gpu")) hub}}{{hub fail (printf "cluster-autoscaler: config.clusterAutoscaler.machineSets.%s: the classes are worker, infra and gpu" $class) hub}}{{hub- end hub}}
@@ -40,16 +56,14 @@ object-templates-raw: |
   {{hub- if not (regexMatch "^[1-9][0-9]*$" (printf "%v" (dig "maxReplicas" "" $r))) hub}}{{hub fail (printf "cluster-autoscaler: machineSets.%s.maxReplicas must be a whole number above 0" $class) hub}}{{hub- end hub}}
   {{hub- if gt (atoi (printf "%v" (dig "minReplicas" "" $r))) (atoi (printf "%v" (dig "maxReplicas" "" $r))) hub}}{{hub fail (printf "cluster-autoscaler: machineSets.%s.minReplicas is above maxReplicas" $class) hub}}{{hub- end hub}}
   {{hub- end hub}}
-  - complianceType: musthave
+  - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: autoscaling.openshift.io/v1
       kind: ClusterAutoscaler
       metadata:
         name: default
       spec:
-        podPriorityThreshold: {{hub $prio hub}}
-        resourceLimits: {{hub $limits | toJson hub}}
-        scaleDown: {{hub $scaleDown | toJson hub}}
+        {{hub $spec | toYaml | autoindent hub}}
   {{- $sets := fromJson `{{hub $sets | toJson hub}}` }}
   {{- range $ms := (lookup "machine.openshift.io/v1beta1" "MachineSet" "openshift-machine-api" "").items }}
   {{- $nodeLabels := (dig "spec" "template" "spec" "metadata" "labels" dict $ms) }}

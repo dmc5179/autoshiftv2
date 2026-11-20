@@ -10,7 +10,7 @@ directory is under `policies/certified/` because the Operator ships in `certifie
 |---|---|---|
 | `policy-nvidia-gpu-operator-install` | enforce | The `nvidia-gpu-operator` namespace, an OwnNamespace OperatorGroup and the `gpu-operator-certified` subscription |
 | `policy-nvidia-gpu-cluster-policy` | enforce | `ClusterPolicy` `gpu-cluster-policy`: driver, container toolkit, device plugin, DCGM, GPU feature discovery, with `config.nvidia-gpu-operator.clusterPolicy` merged over the base. Waits for the Operator |
-| `policy-nvidia-gpu-ready` | inform | The `ClusterPolicy` reports `Ready` |
+| `policy-nvidia-gpu-ready` | inform | The `ClusterPolicy` reports `Ready` with reason `Reconciled` |
 
 ## Enabling
 
@@ -42,8 +42,18 @@ nodes to manage and no error.
 
 The `ClusterPolicy` spec is read from `config.nvidia-gpu-operator.clusterPolicy`, the same key the
 version pin uses, and merged over the base in `manifests/cluster-policy/cluster-policy.yaml`. Maps
-merge key by key and the configured value wins; lists replace the base whole. A field removed from
-config returns to the base.
+merge key by key and the configured value wins; lists replace the base whole.
+
+The policy enforces the result with `mustonlyhave`, so it owns the whole `ClusterPolicy` spec. A
+changed list entry replaces the old one rather than being added beside it, and a field removed from
+config returns to its base value, or is removed from the cluster when the base does not set it. A hand
+edit to the `ClusterPolicy` is reverted on the next evaluation, so change it through config. The
+policy fails, naming the ConfigMap, when the cluster's rendered-config is missing, rather than
+enforcing the base alone.
+
+The base states the values the `ClusterPolicy` CRD defaults under the objects it sets, so that the
+rendered spec matches the stored object. When config adds a sub-object that has CRD defaults of its
+own, for example `devicePlugin.mps`, state those defaults in config too.
 
 ```yaml
 hubClusterSets:
@@ -82,6 +92,24 @@ oc apply --dry-run=server -f <rendered ClusterPolicy>
 `operator.use_ocp_driver_toolkit: true` builds the driver against the running Red Hat Enterprise
 Linux CoreOS release rather than a pinned kernel, which is what lets it survive cluster upgrades.
 
+## Disconnected
+
+`gpu-operator-certified` comes from `registry.redhat.io/redhat/certified-operator-index`, not
+`redhat-operator-index`, so the mirror needs that catalog too. `v25.3` is not the package's default
+channel (`v26.7` is), so an oc-mirror ImageSetConfiguration that filters to `v25.3` must also set
+`defaultChannel: v25.3`, or the mirrored catalog is invalid.
+
+The driver images the Operator uses by default are in the bundle's related images
+(`driver-image`, plus `driver-image-535` and `driver-image-570` in `v25.3.4`), so mirroring the
+package brings them. With `use_ocp_driver_toolkit: true` the driver is built with the Driver
+Toolkit image from the OpenShift release payload, which the platform mirror already carries. A
+driver set through `config.nvidia-gpu-operator.clusterPolicy` (`driver.repository`, `driver.image`
+or `driver.version`) is a different image that no catalog lists: mirror it yourself, and add its
+registry to the cluster's mirror configuration.
+
+The Operator also needs Node Feature Discovery (`nfd`, from `redhat-operator-index`) in the mirror;
+see the preceding section on Node Feature Discovery.
+
 ## Install mode
 
 The Operator's CSV declares `OwnNamespace=True`, `SingleNamespace=True` and `AllNamespaces=False`.
@@ -101,6 +129,10 @@ Until the driver stack finishes, which takes about 15 minutes on a new node, the
 schedulable and reports no `nvidia.com/gpu` capacity, so GPU workloads stay `Pending` with no
 obvious cause. `policy-nvidia-gpu-ready` asserts the `ClusterPolicy` `Ready` condition, which spans
 the whole stack and names the component that is stuck.
+
+The check requires the reason `Reconciled`, not only `Ready=True`. The Operator also reports
+`Ready=True` with reason `NFDLabelsMissing` when no node has NFD labels, and `NoGPUNodes` when no node
+carries `feature.node.kubernetes.io/pci-10de.present`, and deploys nothing in either case.
 
 GPU nodes themselves come from the cluster, from MachineSets or bare-metal hosts that carry an NVIDIA
 GPU.
