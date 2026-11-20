@@ -16,14 +16,14 @@ hubClusterSets:
         namespaces:
           - 'llm'
       hermesAgent:
-        model: 'granite-4-tiny-gpu'
+        model: 'qwen3-8b'
       openWebui:
         auth: 'openshift'
         adminEmail: 'danclark@cluster.local'
         # A direct connection to the model next to Hermes. All Open WebUI users share
         # one key, so they share its owner's tokenRateLimit.
         maas:
-          model: 'granite-4-tiny-gpu'
+          model: 'qwen3-8b'
       # Read by the upstream openshift-lightspeed policy (auto-shift/autoshiftv2 #331), which
       # replaced the fork's MaaS-only config.openshiftLightspeed. The provider is the MaaS
       # gateway on this cluster: https://maas.<ingress domain>/v1. The provider name stays
@@ -35,7 +35,7 @@ hubClusterSets:
           ingressHost: 'maas'
           path: '/v1'
           secretName: 'maas-api-key'
-        model: 'publishers/llm/models/granite-4-tiny-gpu'
+        model: 'publishers/llm/models/qwen3-8b'
         # Offline Red Hat docs, DIRECT to the knowledge bridge for now: the shared MCP
         # gateway is blocked (its controller crash-loops at its shipped limits). The
         # bridge has no auth, so no headers; its NetworkPolicy admits only
@@ -68,7 +68,7 @@ hubClusterSets:
       # (openshell-maas label). The key is minted and renewed in the cluster.
       openshell:
         maas:
-          model: 'granite-4-tiny-gpu'
+          model: 'qwen3-8b'
       # Cluster autoscaler. Totals for the whole cluster: 3 control plane
       # (m6i.2xlarge, 8 vCPU / 32 GiB) + up to 6 workers (m6i.4xlarge,
       # 16 / 64) + up to 2 GPU nodes (g6.xlarge, 4 / 16) = 11 nodes, 128
@@ -106,8 +106,16 @@ hubClusterSets:
           name: 'maas-default-gateway'
           namespace: 'openshift-ingress'
         models:
-          - name: 'granite-4-tiny-gpu'
-            displayName: 'RedHatAI Granite 4.0-h-tiny FP8'
+          # Default model since 2026-11-20: Qwen3-8B FP8 replaced granite-4.0-h-tiny for better tool
+          # calling. 8.8 GiB of weights fits one 24 GB L4 with room for the KV cache, and it is the
+          # model the Red Hat AI Inference 3.5 tool-calling guide uses with the hermes parser. It
+          # answers with a <think> block before the reply unless vLLM gets --reasoning-parser qwen3,
+          # which this policy does not set yet. To go back to Granite: name granite-4-tiny-gpu,
+          # uri oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0,
+          # toolCallParser granite4, and the model names in hermesAgent, openWebui.maas,
+          # openshift-lightspeed and openshell.maas above.
+          - name: 'qwen3-8b'
+            displayName: 'RedHatAI Qwen3-8B FP8'
             # Who may mint a key and spend this model's quota. Narrowed from the
             # default system:authenticated, which included EVERY ServiceAccount on
             # the cluster - any pod anywhere could mint and consume the budget.
@@ -121,7 +129,7 @@ hubClusterSets:
             #
             # Feeds both the MaaSSubscription owner and the MaaSAuthPolicy
             # subjects; the subscription NAME is unaffected and stays
-            # granite-4-tiny-gpu-default. kubeadmin is in neither group and cannot
+            # qwen3-8b-default. kubeadmin is in neither group and cannot
             # mint against this model - by design.
             #   system:serviceaccounts:openshell  the openshell-maas-provider
             #       CronJob mints the key the OpenShell rhoai-maas provider holds.
@@ -137,7 +145,7 @@ hubClusterSets:
             # servedModelName defaults to name. Overriding it so the two
             # disagree returns 404 "the model X does not exist" at inference
             # time, long after every policy reports Compliant.
-            uri: 'oci://registry.redhat.io/rhai/modelcar-granite-4-0-h-tiny-fp8-dynamic:3.0'
+            uri: 'oci://registry.redhat.io/rhelai1/modelcar-qwen3-8b-fp8-dynamic:1.5'
             # The vLLM CUDA runtime the rhods-operator 3.5.2 bundle itself
             # declares (CSV env RELATED_IMAGE_RHAII_VLLM_CUDA_IMAGE, image label
             # version=3.5.2), so a disconnected mirror of the operator already
@@ -158,15 +166,15 @@ hubClusterSets:
             # accessGroups. Raised from 50000 on 2026-11-09: one Hermes agent turn
             # costs about 14k prompt tokens (28k with a tool call), so 50k allowed
             # about 3 turns a minute for everyone. 300k is about 20 turns a minute,
-            # still within what one L4 serving granite-4-tiny can process.
+            # still within what one L4 can process for a model of this size.
             tokenRateLimit: 300000
             tokenRateWindow: '1m'
             # Tool calling. Off unless a parser is named, and the parser is
             # model-specific: granite-4.0-h-* -> granite4, Qwen3 -> hermes,
             # gpt-oss -> openai, Llama 3.1 -> llama3_json (which also needs
-            # chatTemplate). Gemma has no parser and cannot do tool calling.
+            # chatTemplate), Gemma 4 -> gemma4 (vLLM 0.24 in RHOAI 3.5.2 ships it).
             # Required for OpenShift Lightspeed or any agentic client.
-            toolCallParser: 'granite4'
+            toolCallParser: 'hermes'
       # Manual remediations - STIG findings the Compliance Operator ships no fix for, because each
       # needs a site decision. Enabled by the manual-remediations label below; every entry renders
       # nothing until its key is set. See docs/compliance.md.
@@ -522,7 +530,7 @@ hubClusterSets:
       openshell-version: 'v0.1.6-rhaiv.4'
       # Second step of the rollout: turn on only after policy-openshell-gateway-ready is
       # Compliant and one hand-made sandbox has run. Sandboxes then share the
-      # granite-4-tiny-gpu token budget with Hermes and everyone else.
+      # qwen3-8b token budget with Hermes and everyone else.
       openshell-maas: 'true'
       # Workloads living in their own repos, deployed as ArgoCD Applications.
       # Reads config.gitopsWorkloads above. Enabling this ADOPTS an existing
