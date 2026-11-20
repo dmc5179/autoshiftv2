@@ -15,6 +15,34 @@ hubClusterSets:
         # Limitador make outbound calls (the RDS connection among them).
         namespaces:
           - 'llm'
+      # Vertical Pod Autoscaler rules (policy-vpa-rules).
+      #
+      # mcp-gateway-controller: an UNSUPPORTED workaround for CONNLINK-2025. The RHCL 1.5
+      # KuadrantControlPlane deploys this controller with a hard-coded 256Mi limit, it caches
+      # cluster-wide objects and needs about 330Mi on this hub, and the operator reverts edits to
+      # its Deployment. A VPA changes the pod, not the Deployment, so the operator leaves it alone.
+      # The chart sets 64Mi request / 256Mi limit, and VPA keeps that 1:4 ratio when it raises the
+      # request (controlledValues RequestsAndLimits), so minAllowed 400Mi gives about 1.6Gi of limit.
+      # Initial mode acts only when a pod is created: after the VPA exists, delete the crash-looping
+      # pod once so its replacement is admitted with the new values. Remove the rule once RHCL fixes
+      # the controller's cache or makes its resources configurable.
+      vertical-pod-autoscaler:
+        rules:
+          mcp-gateway-controller:
+            namespace: 'openshift-operators'
+            targetRef:
+              apiVersion: 'apps/v1'
+              kind: 'Deployment'
+              name: 'mcp-gateway-controller'
+            updateMode: 'Initial'
+            resourcePolicy:
+              containerPolicies:
+                - containerName: 'mcp-controller'
+                  minAllowed:
+                    memory: '400Mi'
+                  maxAllowed:
+                    memory: '1Gi'
+                  controlledValues: 'RequestsAndLimits'
       hermesAgent:
         model: 'qwen3-8b'
       openWebui:
@@ -801,6 +829,14 @@ hubClusterSets:
       dev-spaces-channel: stable
       dev-spaces-source: redhat-operators
       dev-spaces-source-namespace: openshift-marketplace
+      # Vertical Pod Autoscaler: operator plus the rules in config.vertical-pod-autoscaler.rules
+      # (the mcp-gateway-controller workaround for CONNLINK-2025).
+      vertical-pod-autoscaler: 'true'
+      vertical-pod-autoscaler-rules: 'true'
+      vertical-pod-autoscaler-subscription-name: vertical-pod-autoscaler
+      vertical-pod-autoscaler-channel: stable
+      vertical-pod-autoscaler-source: redhat-operators
+      vertical-pod-autoscaler-source-namespace: openshift-marketplace
       ### Developer Hub
       dev-hub: 'false'
       dev-hub-subscription-name: rhdh
