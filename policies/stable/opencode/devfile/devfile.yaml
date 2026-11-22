@@ -1,0 +1,162 @@
+# OpenCode (web UI) in a Red Hat OpenShift Dev Spaces workspace, thinking with a model served
+# through Red Hat OpenShift AI Models-as-a-Service (MaaS).
+#
+# Served to users by raw Git URL: the opencode policy's dashboard sample points here. Each user's
+# workspace runs in <user>-devspaces with that user's own MaaS key, so nothing is shared between
+# users.
+#
+# Where each setting comes from (container env always beats a mounted ConfigMap or Secret, so the
+# MaaS URL and model are deliberately NOT set in env below):
+#   MAAS_API_KEY   the user's own Secret in <user>-devspaces, mounted as env into all of their
+#                  workspaces. See policies/stable/opencode/README.md.
+#   MAAS_BASE_URL  the opencode-maas ConfigMap the policy replicates into every user namespace.
+#                  Without it: https://maas.<apps domain>/v1, derived from CHE_DASHBOARD_URL.
+#   MAAS_MODEL     the same ConfigMap. Without it: MAAS_MODEL_DEFAULT below.
+#
+# Auth: none in this devfile. The endpoint is secure, so the Dev Spaces gateway authenticates every
+# request with the workspace owner's identity. Swapping the identity provider (Keycloak, say) is a
+# Dev Spaces setting, not a change here.
+schemaVersion: 2.2.2
+metadata:
+  name: opencode-maas
+  displayName: OpenCode (MaaS)
+  description: OpenCode web UI backed by Red Hat OpenShift AI Models-as-a-Service
+  tags:
+    - OpenCode
+    - AI
+    - MaaS
+components:
+  - name: opencode
+    container:
+      # UBI9, runs under restricted-v2 with an arbitrary UID. The Dev Spaces editor is injected
+      # into this container too, so the limits cover both.
+      image: quay.io/opendatahub/odh-opencode-rhel9:20260619-194847e
+      # Keep the container up on its own; OpenCode is started by the postStart command, so a
+      # crash in OpenCode does not take the editor down with it.
+      command: ['tail']
+      args: ['-f', '/dev/null']
+      memoryRequest: 1Gi
+      memoryLimit: 4Gi
+      cpuRequest: 500m
+      cpuLimit: '2'
+      mountSources: true
+      env:
+        # The trust bundle Dev Spaces mounts into every workspace container. It carries the
+        # cluster ingress CA because the policy labels a copy of it as a Dev Spaces ca-bundle.
+        # OpenCode runs on Bun, which ignores NODE_TLS_REJECT_UNAUTHORIZED, so this is the only
+        # way it trusts the self-signed MaaS certificate.
+        - name: NODE_EXTRA_CA_CERTS
+          value: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+        # OpenCode state under /projects, which persists across workspace restarts. The image
+        # creates ~/.local/state 0755, which an arbitrary UID cannot write.
+        - name: XDG_CONFIG_HOME
+          value: /projects/.opencode/config
+        - name: XDG_DATA_HOME
+          value: /projects/.opencode/data
+        - name: XDG_STATE_HOME
+          value: /projects/.opencode/state
+        - name: OPENCODE_PORT
+          value: '8003'
+        - name: MAAS_MODEL_DEFAULT
+          value: publishers/llm/models/qwen3-8b
+        # Qwen3-8B serves a 40960-token context. OpenCode asks for 32000 output tokens by default,
+        # which leaves too little room for the prompt and hangs with no output on a small context.
+        - name: MODEL_CONTEXT_LIMIT
+          value: '40960'
+        - name: MODEL_OUTPUT_LIMIT
+          value: '8192'
+      endpoints:
+        - name: opencode
+          targetPort: 8003
+          exposure: public
+          protocol: https
+          # Behind the Dev Spaces gateway, which admits only the workspace owner.
+          secure: true
+          path: /
+          attributes:
+            # Browser access: the gateway accepts its session cookie, not only a bearer token.
+            cookiesAuthEnabled: true
+            urlRewriteSupported: true
+            discoverable: false
+commands:
+  # Writes the OpenCode config from env, makes sure the project directory is a git repository
+  # (OpenCode refuses to work outside one), and starts `opencode web` in the background. Safe to
+  # run again: it stops the previous instance first. Log: /tmp/opencode/opencode.log.
+  - id: start-opencode
+    exec:
+      component: opencode
+      label: Start OpenCode web UI
+      commandLine: |
+        d=/tmp/opencode
+        mkdir -p "$d"
+        cat > "$d/run.sh" <<'EOS'
+        #!/bin/bash
+        set -euo pipefail
+        log() { echo "[opencode] $*"; }
+        base="${MAAS_BASE_URL:-}"
+        if [ -z "$base" ] && [ -n "${CHE_DASHBOARD_URL:-}" ]; then
+          host=$(printf '%s' "$CHE_DASHBOARD_URL" | sed -E 's#^https?://##; s#[/:].*$##')
+          base="https://maas.${host#*.}/v1"
+        fi
+        if [ -z "$base" ]; then
+          log "no MAAS_BASE_URL and no CHE_DASHBOARD_URL to derive it from; set MAAS_BASE_URL"
+          exit 1
+        fi
+        model="${MAAS_MODEL:-${MAAS_MODEL_DEFAULT:-publishers/llm/models/qwen3-8b}}"
+        if [ -z "${MAAS_API_KEY:-}" ]; then
+          log "WARNING: MAAS_API_KEY is not set. Mint a MaaS key and store it in a Secret in your"
+          log "<user>-devspaces namespace (policies/stable/opencode/README.md), then restart the workspace."
+        fi
+        cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+        mkdir -p "$cfg" "${XDG_DATA_HOME:-$HOME/.local/share}" "${XDG_STATE_HOME:-$HOME/.local/state}"
+        # The key stays out of the file: OpenCode substitutes {env:MAAS_API_KEY} at load time.
+        umask 077
+        jq -n --arg base "$base" --arg model "$model" \
+          --argjson ctx "${MODEL_CONTEXT_LIMIT:-40960}" --argjson out "${MODEL_OUTPUT_LIMIT:-8192}" '{
+            "$schema": "https://opencode.ai/config.json",
+            provider: {maas: {
+              npm: "@ai-sdk/openai-compatible",
+              name: "Red Hat OpenShift AI MaaS",
+              options: {baseURL: $base, apiKey: "{env:MAAS_API_KEY}"},
+              models: {($model): {name: $model, limit: {context: $ctx, output: $out}}}}},
+            model: ("maas/" + $model),
+            small_model: ("maas/" + $model),
+            enabled_providers: ["maas"]
+          }' > "$cfg/opencode.json.tmp"
+        mv "$cfg/opencode.json.tmp" "$cfg/opencode.json"
+        log "provider ${base}, model ${model}"
+        work="${OPENCODE_WORKDIR:-${PROJECTS_ROOT:-/projects}/workspace}"
+        mkdir -p "$work"
+        cd "$work"
+        if ! git rev-parse --git-dir >/dev/null 2>&1; then
+          git init -q
+          if [ -n "$(git config user.email || true)" ]; then
+            git commit -q --allow-empty -m "init"
+          else
+            git -c user.name=OpenCode -c user.email=opencode@localhost commit -q --allow-empty -m "init"
+          fi
+          log "initialized a git repository in $work"
+        fi
+        echo $$ > /tmp/opencode/pid
+        while true; do
+          opencode web --hostname 0.0.0.0 --port "${OPENCODE_PORT:-8003}" &
+          echo $! > /tmp/opencode/child
+          wait $! || true
+          log "opencode web exited; restarting in 5s"
+          sleep 5
+        done
+        EOS
+        for f in "$d/pid" "$d/child"; do
+          if [ -f "$f" ]; then kill "$(cat "$f")" 2>/dev/null || true; fi
+        done
+        nohup /bin/bash "$d/run.sh" > "$d/opencode.log" 2>&1 &
+        echo "OpenCode starting on port 8003; log: $d/opencode.log"
+  # Shows the OpenCode log in a terminal.
+  - id: opencode-log
+    exec:
+      component: opencode
+      label: Show OpenCode log
+      commandLine: tail -n 200 -f /tmp/opencode/opencode.log
+events:
+  postStart:
+    - start-opencode

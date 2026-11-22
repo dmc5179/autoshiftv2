@@ -45,6 +45,10 @@ hubClusterSets:
                   controlledValues: 'RequestsAndLimits'
       hermesAgent:
         model: 'qwen3-8b'
+      # OpenCode sample on the Dev Spaces dashboard. The MaaS host is read from the
+      # maas-default-gateway HTTPS listener; users mint their own keys (group maas-users).
+      opencode:
+        model: 'qwen3-8b'
       openWebui:
         auth: 'openshift'
         adminEmail: 'danclark@cluster.local'
@@ -829,6 +833,8 @@ hubClusterSets:
       dev-spaces-channel: stable
       dev-spaces-source: redhat-operators
       dev-spaces-source-namespace: openshift-marketplace
+      # OpenCode (MaaS) sample on the Dev Spaces dashboard, policy-opencode-samples.
+      opencode: 'true'
       # Vertical Pod Autoscaler: operator plus the rules in config.vertical-pod-autoscaler.rules
       # (the mcp-gateway-controller workaround for CONNLINK-2025).
       vertical-pod-autoscaler: 'true'

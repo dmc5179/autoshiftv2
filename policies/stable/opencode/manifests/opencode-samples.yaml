@@ -1,0 +1,90 @@
+# OpenCode for Red Hat OpenShift Dev Spaces users: a dashboard sample that opens the OpenCode devfile,
+# plus the two cluster-wide settings that devfile needs. Everything lands in openshift-devspaces;
+# per-user state lives in each user's own workspace.
+#
+# Configuration is config.opencode. The only required key is `model`, the name of an entry in
+# config.openshiftAiModels.models; the request model id publishers/<namespace>/models/<model> is
+# derived from it, as hermes-agent does. The MaaS hostname is config.opencode.maasHost, or else the
+# HTTPS listener hostname of the MaaS Gateway, read on the managed cluster.
+#
+# Objects:
+#   - the getting-started-samples ConfigMap the Dev Spaces dashboard lists as sample cards. The
+#     sample URL is the raw devfile URL, config.opencode.devfileUrl. The sample format has no field
+#     for parameters, so the URL and model reach workspaces through the next ConfigMap instead.
+#   - a workspaces-config ConfigMap, mounted as env: Dev Spaces copies it into every user namespace
+#     and sets MAAS_BASE_URL and MAAS_MODEL in every workspace container. Creating or changing it
+#     restarts running workspaces.
+#   - a ca-bundle ConfigMap holding the ingress CA, copied on the managed cluster from
+#     openshift-config-managed/default-ingress-cert. Dev Spaces merges it into the trust bundle it
+#     mounts into workspaces, which the devfile points NODE_EXTRA_CA_CERTS at. Without it OpenCode
+#     cannot verify the self-signed MaaS certificate.
+#
+# API keys are not handled here. Each user mints a MaaS key and stores it in a Secret in their own
+# <user>-devspaces namespace; see README.md.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config") hub}}
+  {{hub- if not $raw hub}}{{hub fail (printf "opencode: ConfigMap %s/%s.rendered-config has no config key" .PolicyMetadata.namespace .ManagedClusterName) hub}}{{hub- end hub}}
+  {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
+  {{hub- $o := (index $cfg "opencode" | default dict) hub}}
+  {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
+  {{hub- $model := (dig "model" "" $o) hub}}
+  {{hub- if not $model hub}}{{hub fail "opencode: config.opencode.model is required, the name of a model in config.openshiftAiModels.models" hub}}{{hub- end hub}}
+  {{hub- $modelNs := (dig "namespace" "" $m) hub}}
+  {{hub- if not $modelNs hub}}{{hub fail "opencode: config.openshiftAiModels.namespace is required to build the request model id" hub}}{{hub- end hub}}
+  {{hub- $found := false hub}}
+  {{hub- range $x := (dig "models" (list) $m) hub}}
+  {{hub- if eq (dig "name" "" $x) $model hub}}{{hub- $found = true hub}}{{hub- end hub}}
+  {{hub- end hub}}
+  {{hub- if not $found hub}}{{hub fail (printf "opencode: config.opencode.model %s is not a model in config.openshiftAiModels.models" $model) hub}}{{hub- end hub}}
+  {{hub- $url := (dig "devfileUrl" "https://raw.githubusercontent.com/dmc5179/autoshiftv2/rhoai-maas/policies/stable/opencode/devfile/devfile.yaml" $o) hub}}
+  {{hub- if not (hasPrefix "https://" $url) hub}}{{hub fail (printf "opencode: config.opencode.devfileUrl %s must be an https URL to the raw devfile" $url) hub}}{{hub- end hub}}
+  {{hub- $sample := (dict "displayName" (dig "displayName" "OpenCode (MaaS)" $o) "description" (dig "description" "OpenCode web UI with your own Models-as-a-Service key" $o) "tags" (list "OpenCode" "AI" "MaaS") "url" $url "icon" (dict "mediatype" "image/svg+xml" "base64data" "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTAiIGZpbGw9IiMxNTE1MTUiLz48cGF0aCBkPSJNMTQgMjJsMTIgMTAtMTIgMTAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSI1IiBmaWxsPSJub25lIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMzAgNDRoMjAiIHN0cm9rZT0iI2VlMDAwMCIgc3Ryb2tlLXdpZHRoPSI1IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz48L3N2Zz4=")) hub}}
+  {{hub- $maasHost := (dig "maasHost" "" $o) hub}}
+  {{hub- $gwName := (dig "gateway" "name" "maas-default-gateway" $m) hub}}
+  {{hub- $gwNs := (dig "gateway" "namespace" "openshift-ingress" $m) hub}}
+  {{- $host := "{{hub $maasHost hub}}" }}
+  {{- if not $host }}
+  {{- $gw := (lookup "gateway.networking.k8s.io/v1" "Gateway" "{{hub $gwNs hub}}" "{{hub $gwName hub}}") | default dict }}
+  {{- range $l := (dig "spec" "listeners" (list) $gw) }}
+  {{- if and (not $host) (eq (dig "protocol" "" $l) "HTTPS") }}{{- $host = (dig "hostname" "" $l) }}{{- end }}
+  {{- end }}
+  {{- end }}
+  {{- if not $host }}{{ fail "opencode: no HTTPS listener hostname on Gateway {{hub $gwNs hub}}/{{hub $gwName hub}}; set config.opencode.maasHost or check policy-openshift-ai-maas-ready" }}{{- end }}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: opencode-getting-started-samples
+        namespace: openshift-devspaces
+        labels:
+          app.kubernetes.io/part-of: che.eclipse.org
+          app.kubernetes.io/component: getting-started-samples
+      data:
+        opencode-samples.json: {{hub (list $sample) | toJson | toJson hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: opencode-maas
+        namespace: openshift-devspaces
+        labels:
+          app.kubernetes.io/part-of: che.eclipse.org
+          app.kubernetes.io/component: workspaces-config
+        annotations:
+          controller.devfile.io/mount-as: env
+      data:
+        MAAS_BASE_URL: 'https://{{ $host }}/v1'
+        MAAS_MODEL: 'publishers/{{hub $modelNs hub}}/models/{{hub $model hub}}'
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: opencode-ingress-ca
+        namespace: openshift-devspaces
+        labels:
+          app.kubernetes.io/part-of: che.eclipse.org
+          app.kubernetes.io/component: ca-bundle
+      data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'
