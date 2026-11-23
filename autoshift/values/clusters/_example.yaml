@@ -149,6 +149,7 @@ clusters:
       imageregistry: 'true'
       acs: 'true'
       dev-spaces: 'true'
+      opencode: 'true'
       dev-hub: 'true'
       pipelines: 'true'
       tas: 'true'

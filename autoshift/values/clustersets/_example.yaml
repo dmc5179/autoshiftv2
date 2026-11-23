@@ -221,6 +221,23 @@ hubClusterSets:
           #   minReplicas: 1
           #   maxReplicas: 2
       # =======================================================================
+      # opencode: an "OpenCode (MaaS)" sample on the Red Hat OpenShift Dev Spaces dashboard
+      # (DATA; the ENABLE flag is the opencode label below, placed only with dev-spaces).
+      # Each user mints their own MaaS key and stores it in their <user>-devspaces namespace;
+      # see policies/stable/opencode/README.md. That model's accessGroups must include the
+      # users' group.
+      # =======================================================================
+      opencode:
+        # Required. The name of a model in openshiftAiModels.models; the request model id
+        # publishers/<namespace>/models/<name> is derived. Example value.
+        model: 'granite-4-tiny-gpu'
+        # Default: devfile/devfile.yaml on the fork's rhoai-maas branch.
+        devfileUrl: 'https://raw.githubusercontent.com/dmc5179/autoshiftv2/rhoai-maas/policies/stable/opencode/devfile/devfile.yaml'
+        displayName: 'OpenCode (MaaS)'              # default OpenCode (MaaS)
+        # Optional. Default: the HTTPS listener hostname of openshiftAiModels.gateway. Left
+        # commented so CI exercises that lookup.
+        # maasHost: 'maas.apps.example.com'
+      # =======================================================================
       # hermes-agent: the Hermes Agent harness, thinking with a model served through
       # Models-as-a-Service (DATA; the ENABLE flag is the hermes-agent label below).
       # Hermes derives its request model id, subscription, gateway and CA from
@@ -2739,6 +2756,8 @@ hubClusterSets:
       dev-spaces-channel: stable
       dev-spaces-source: redhat-operators
       dev-spaces-source-namespace: openshift-marketplace
+      # OpenCode sample on the Dev Spaces dashboard (policy-opencode-samples). Needs dev-spaces.
+      opencode: 'false'
 
       # =======================================================================
       # Vertical Pod Autoscaler
