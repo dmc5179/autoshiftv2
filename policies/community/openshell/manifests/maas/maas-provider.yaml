@@ -224,7 +224,15 @@ object-templates-raw: |
           # --- the profile ---------------------------------------------------------------
           if openshell profile describe rhoai-maas --global >/dev/null 2>&1; then
               if [[ "${have_hash}" != "${want_hash}" ]]; then
-                  openshell profile update rhoai-maas --global -f "${PROFILE_FILE}" >/dev/null
+                  # An update must carry the profile's current resource_version, which only the
+                  # gateway knows; without it the CLI refuses the update and no key is minted.
+                  rv="$(openshell profile export rhoai-maas --global 2>/dev/null | sed -n 's/^resource_version: *//p' | head -1)"
+                  if [[ -z "${rv}" ]]; then
+                      log "FATAL: cannot read the resource_version of provider profile rhoai-maas"
+                      exit 1
+                  fi
+                  { printf 'resource_version: %s\n' "${rv}"; grep -v '^resource_version:' "${PROFILE_FILE}"; } > "${HOME}/profile-update.yaml"
+                  openshell profile update rhoai-maas --global -f "${HOME}/profile-update.yaml" >/dev/null
                   log "updated provider profile rhoai-maas"
               fi
           else
