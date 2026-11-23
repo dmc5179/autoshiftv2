@@ -81,13 +81,13 @@ components:
 commands:
   # Writes the OpenCode config from env, makes sure the project directory is a git repository
   # (OpenCode refuses to work outside one), and starts `opencode web` in the background. Safe to
-  # run again: it stops the previous instance first. Log: /tmp/opencode/opencode.log.
+  # run again: it stops the previous instance first. Log: /tmp/opencode-web/opencode.log.
   - id: start-opencode
     exec:
       component: opencode
       label: Start OpenCode web UI
       commandLine: |
-        d=/tmp/opencode
+        d=/tmp/opencode-web
         mkdir -p "$d"
         cat > "$d/run.sh" <<'EOS'
         #!/bin/bash
@@ -137,10 +137,10 @@ commands:
           fi
           log "initialized a git repository in $work"
         fi
-        echo $$ > /tmp/opencode/pid
+        echo $$ > /tmp/opencode-web/pid
         while true; do
           opencode web --hostname 0.0.0.0 --port "${OPENCODE_PORT:-8003}" &
-          echo $! > /tmp/opencode/child
+          echo $! > /tmp/opencode-web/child
           wait $! || true
           log "opencode web exited; restarting in 5s"
           sleep 5
@@ -156,7 +156,7 @@ commands:
     exec:
       component: opencode
       label: Show OpenCode log
-      commandLine: tail -n 200 -f /tmp/opencode/opencode.log
+      commandLine: tail -n 200 -f /tmp/opencode-web/opencode.log
 events:
   postStart:
     - start-opencode
