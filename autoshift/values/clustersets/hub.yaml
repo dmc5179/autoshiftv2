@@ -634,7 +634,7 @@ hubClusterSets:
       node-maintenance-source-namespace: openshift-marketplace
       node-maintenance-version: 'node-maintenance-operator.v5.7.1'
       ### Tempo
-      tempo: 'false'
+      tempo: 'true'
       tempo-subscription-name: tempo-product
       tempo-channel: stable
       tempo-source: redhat-operators
@@ -657,7 +657,7 @@ hubClusterSets:
       ### Servicemesh3 Ambient
       servicemesh3-ambient: 'false'
       ### OpenTelemetry
-      opentelemetry: 'false'
+      opentelemetry: 'true'
       opentelemetry-subscription-name: opentelemetry-product
       opentelemetry-channel: stable
       opentelemetry-source: redhat-operators
@@ -897,7 +897,7 @@ hubClusterSets:
       logging-source: redhat-operators
       logging-source-namespace: openshift-marketplace
       ### Cluster Observability Operator
-      coo: 'false'
+      coo: 'true'
       coo-subscription-name: cluster-observability-operator
       # coo-version: 'cluster-observability-operator.v1.5.5'
       coo-channel: stable
