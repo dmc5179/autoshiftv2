@@ -3,9 +3,11 @@
 # One gateway per cluster, from config.mcpGateway.gateway. Every server in
 # config.mcpGateway.servers registers with it:
 #
-#   Gateway               openshift-ingress/<name>, two listeners: "mcp" is the public,
-#                         authenticated endpoint; "mcp-internal" carries the *.mcp.local
-#                         hostnames that server HTTPRoutes attach to
+#   Gateway               openshift-ingress/<name>, two plain-HTTP listeners on the same port:
+#                         "mcp" is the authenticated endpoint; "mcp-internal" carries the
+#                         *.mcp.local hostnames that server HTTPRoutes attach to
+#   Route                 mcp.<ingress domain> (or gateway.hostname), edge TLS through the
+#                         default router, to the "mcp" listener
 #   ReferenceGrant        lets the MCPGatewayExtension, in the gateway namespace, name the
 #                         Gateway in openshift-ingress
 #   MCPGatewayExtension   the MCP Gateway controller deploys the broker-router and its Service in
@@ -102,7 +104,6 @@ object-templates-raw: |
   {{hub- if not (and (dig "name" "" $v) (dig "tools" (list) $v)) hub}}{{hub fail "mcp-gateway: every config.mcpGateway.virtualServers entry needs name and tools" hub}}{{hub- end hub}}
   {{hub- end hub}}
   {{- $domain := (lookup "config.openshift.io/v1" "Ingress" "" "cluster").spec.domain }}
-  {{- $routerCert := (dig "spec" "defaultCertificate" "name" "router-certs-default" ((lookup "operator.openshift.io/v1" "IngressController" "openshift-ingress-operator" "default") | default dict)) }}
   # Shared and cluster-scoped. openshift-ai-maas declares the same object with the same spec,
   # so the two policies agree rather than fight. Creating it is what makes the Ingress Operator
   # install the Istio control plane, and with it the EnvoyFilter CRD the MCP Gateway controller
@@ -138,16 +139,15 @@ object-templates-raw: |
       spec:
         gatewayClassName: {{hub $gwClass hub}}
         listeners:
+          # Same port as mcp-internal, because the MCP Gateway controller matches a server's
+          # route to the extension by the port of the listener it attaches to: with the public
+          # listener on 443 and the servers on 8080, every MCPServerRegistration stays NotReady
+          # ("no matching mcpgatewayextensions for attached listener"). No hostname, so the
+          # Ingress Operator publishes no DNS record that would shadow the router's wildcard;
+          # the Route below brings mcp.<domain> in with TLS.
           - name: mcp
-            hostname: {{hub if $host hub}}{{hub $host hub}}{{hub else hub}}mcp.{{ $domain }}{{hub end hub}}
-            port: 443
-            protocol: HTTPS
-            tls:
-              mode: Terminate
-              certificateRefs:
-                - group: ''
-                  kind: Secret
-                  name: {{hub if $tlsSecret hub}}{{hub $tlsSecret hub}}{{hub else hub}}{{ $routerCert }}{{hub end hub}}
+            port: {{hub $port hub}}
+            protocol: HTTP
             allowedRoutes:
               namespaces:
                 from: Selector
@@ -169,6 +169,31 @@ object-templates-raw: |
                     - key: kubernetes.io/metadata.name
                       operator: In
                       values: {{hub $routeNs | toJson hub}}
+  # The public endpoint: edge TLS at the default router (Connectivity Link 1.5, Install the MCP
+  # gateway, 2.3). The router keeps the Host header, which the hostname-less mcp listener takes.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: route.openshift.io/v1
+      kind: Route
+      metadata:
+        name: {{hub $name hub}}
+        namespace: {{hub $gwNs hub}}
+      spec:
+        host: {{hub if $host hub}}{{hub $host hub}}{{hub else hub}}mcp.{{ $domain }}{{hub end hub}}
+        port:
+          targetPort: {{hub $port hub}}
+        tls:
+          termination: edge
+          insecureEdgeTerminationPolicy: Redirect
+          {{hub- if $tlsSecret hub}}
+          externalCertificate:
+            name: {{hub $tlsSecret hub}}
+          {{hub- end hub}}
+        to:
+          kind: Service
+          name: {{hub $name hub}}-{{hub $gwClass hub}}
+          weight: 100
+        wildcardPolicy: None
   - complianceType: mustonlyhave
     objectDefinition:
       apiVersion: gateway.networking.k8s.io/v1beta1
@@ -200,9 +225,7 @@ object-templates-raw: |
           name: {{hub $name hub}}
           namespace: {{hub $gwNs hub}}
           sectionName: mcp
-        # The broker reaches registered servers back through the Gateway. Pointed at the
-        # plain-HTTP internal listener explicitly: the derived default follows the public
-        # listener, which is HTTPS and would need the Gateway CA in caCertBundleRef.
+        # The broker reaches registered servers back through the Gateway, on the shared port.
         privateHost: http://{{hub $name hub}}-{{hub $gwClass hub}}.{{hub $gwNs hub}}.svc.cluster.local:{{hub $port hub}}
         logLevel: {{hub (dig "logLevel" "info" $gw) hub}}
         {{hub- if eq $authType "jwt" hub}}

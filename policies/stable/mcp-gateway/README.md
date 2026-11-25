@@ -98,8 +98,8 @@ Every value in the sample is an example.
 | `gateway.namespace` | `mcp-gateway` | Created by the policy. The broker, the extension and the virtual servers run here |
 | `gateway.className` | `openshift-default` | |
 | `gateway.hostname` | `mcp.<ingress domain>` | The public endpoint. The domain is read on the managed cluster |
-| `gateway.tlsSecretName` | default IngressController certificate | Must be in `openshift-ingress` |
-| `gateway.internalPort` | `8080` | The `*.mcp.local` listener that server routes attach to |
+| `gateway.tlsSecretName` | the router's default certificate | The `Route`'s `externalCertificate`. Must be in `openshift-ingress`, and the router needs permission to read it |
+| `gateway.internalPort` | `8080` | The port both listeners use |
 | `gateway.logLevel` | `info` | Broker log level |
 | `gateway.auth.type` | | Required: `none`, `kubernetes` or `jwt` |
 | `gateway.auth.audiences` | `[https://kubernetes.default.svc]` | `kubernetes` only |
@@ -145,12 +145,23 @@ instead.
 
 ## How the gateway is wired
 
-One `Gateway`, `openshift-ingress/<name>`, with two listeners:
+One `Gateway`, `openshift-ingress/<name>`, with two plain-HTTP listeners on `internalPort`:
 
-- `mcp`, HTTPS on 443, is the public endpoint. The MCP Gateway controller creates the HTTPRoute for
-  `/mcp` on it, and the `<name>-mcp` `AuthPolicy` protects it.
-- `mcp-internal`, HTTP, carries the `*.mcp.local` hostnames that server routes attach to. The
-  broker reaches the servers through it, so `privateHost` points at it explicitly.
+- `mcp`, with no hostname, is the authenticated endpoint. The MCP Gateway controller creates the
+  HTTPRoute for `/mcp` on it, and the `<name>-mcp` `AuthPolicy` protects it.
+- `mcp-internal` carries the `*.mcp.local` hostnames that server routes attach to. The broker
+  reaches the servers through it, so `privateHost` points at it explicitly.
+
+Both listeners share one port because the MCP Gateway controller matches a server's route to the
+`MCPGatewayExtension` by the port of the listener the route attaches to. With the public listener
+on 443 and the servers on 8080, every `MCPServerRegistration` stays `NotReady` with "no matching
+mcpgatewayextensions for attached listener".
+
+Clients outside the cluster reach the gateway through a `Route`, `openshift-ingress/<name>`, for
+`gateway.hostname`, with edge TLS at the default router, as Connectivity Link 1.5 documents for
+exposing a gateway. The `mcp` listener has no hostname, so the Ingress Operator publishes no DNS
+record for it that would shadow the router's wildcard record. In-cluster clients can call
+`http://<name>-<className>.openshift-ingress.svc.cluster.local:<internalPort>/mcp` directly.
 
 The `Gateway` is in `openshift-ingress` because the Ingress Operator's Gateway API implementation
 requires every `openshift-default` Gateway to be there. Kuadrant policies attach only to targets in
