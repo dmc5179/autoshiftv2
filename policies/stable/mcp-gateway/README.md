@@ -136,7 +136,7 @@ has no `issuerUrl`, a server lacks `name`, `namespace`, `port` or `prefix`, a vi
 | Policy | Mode | Does |
 |--------|------|------|
 | `policy-mcp-gateway-prereqs` | inform | The MCP Gateway CRDs are established and `KuadrantControlPlane` is `Ready`. Waits for `policy-rhcl-ready` |
-| `policy-mcp-gateway` | enforce | The namespace, `Gateway`, `ReferenceGrant`, `MCPGatewayExtension`, the `AuthPolicy` objects, and per server an `HTTPRoute` and an `MCPServerRegistration`, per virtual server an `MCPVirtualServer`. Also the shared `openshift-default` GatewayClass |
+| `policy-mcp-gateway` | enforce | The namespace, `Gateway`, `Route`, `ReferenceGrant`, `MCPGatewayExtension`, the `AuthPolicy` objects and the Authorino TLS `EnvoyFilter`, and per server an `HTTPRoute` and an `MCPServerRegistration`, per virtual server an `MCPVirtualServer`. Also the shared `openshift-default` GatewayClass |
 | `policy-mcp-gateway-ready` | inform | The EnvoyFilter CRD exists, the `Gateway` is `Programmed`, the extension and each registration `Ready`, each `AuthPolicy` `Enforced`, and each Secret created out of band is present |
 
 The prerequisite gate matters because a `ConfigurationPolicy` naming a kind whose CRD does not
@@ -201,6 +201,16 @@ The public `AuthPolicy` excludes `/.well-known/oauth-protected-resource`, which 
 before they have a token. Both `AuthPolicy` objects use `mustonlyhave`: under `musthave`, a changed
 `auth.type` would leave the old method beside the new one, and a request passes when any method
 succeeds.
+
+### TLS to Authorino
+
+With Red Hat OpenShift AI on the cluster, Authorino serves TLS on its gRPC authorization port.
+Kuadrant generates a plain text connection to it for each Gateway, and RHOAI's
+odh-model-controller patches that to TLS for the MaaS gateway only. Without the same patch every
+authenticated request through this gateway fails with HTTP 500, the Wasm log reports "gRPC status
+code is not OK", and Authorino logs nothing. When `auth.type` is not `none`, this policy creates
+`EnvoyFilter` `<name>-authn-ssl` in `openshift-ingress`, which gives the connection TLS, trusting the
+service CA. It uses Authorino's Service in `toolAuthorization.kuadrantNamespace`.
 
 ## Tool authorization
 

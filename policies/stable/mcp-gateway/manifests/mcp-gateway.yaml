@@ -242,6 +242,55 @@ object-templates-raw: |
           generate: Disabled
         {{hub- end hub}}
   {{hub- if ne $authType "none" hub}}
+  # TLS from this Gateway to Authorino. With Red Hat OpenShift AI on the cluster, Authorino's
+  # gRPC authorization port serves TLS, and the Kuadrant-generated cluster for it is plain
+  # text: every check then fails ("gRPC status code is not OK" in the Wasm log, HTTP 500, and
+  # nothing in Authorino's log). odh-model-controller adds this same patch for the MaaS gateway
+  # only (maas-default-gateway-authn-ssl). Priority -1 applies it before Kuadrant's patch, so
+  # this definition of kuadrant-auth-service wins.
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: networking.istio.io/v1alpha3
+      kind: EnvoyFilter
+      metadata:
+        name: {{hub $name hub}}-authn-ssl
+        namespace: {{hub $gwNs hub}}
+      spec:
+        priority: -1
+        targetRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: {{hub $name hub}}
+        configPatches:
+          - applyTo: CLUSTER
+            match:
+              cluster:
+                service: authorino-authorino-authorization.{{hub $kuadrantNs hub}}.svc.cluster.local
+            patch:
+              operation: ADD
+              value:
+                name: kuadrant-auth-service
+                type: STRICT_DNS
+                connect_timeout: 1s
+                lb_policy: ROUND_ROBIN
+                http2_protocol_options: {}
+                load_assignment:
+                  cluster_name: kuadrant-auth-service
+                  endpoints:
+                    - lb_endpoints:
+                        - endpoint:
+                            address:
+                              socket_address:
+                                address: authorino-authorino-authorization.{{hub $kuadrantNs hub}}.svc.cluster.local
+                                port_value: 50051
+                transport_socket:
+                  name: envoy.transport_sockets.tls
+                  typed_config:
+                    '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+                    common_tls_context:
+                      validation_context:
+                        trusted_ca:
+                          filename: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
   # mustonlyhave: switching auth.type under musthave would merge the new method beside the
   # old one, and Authorino accepts a request when any one method succeeds.
   - complianceType: mustonlyhave
