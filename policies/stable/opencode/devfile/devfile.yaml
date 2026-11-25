@@ -121,6 +121,20 @@ commands:
           fi
           log "initialized a git repository in $work"
         fi
+        # oc and kubectl from the cluster's own console downloads service (in-cluster, so no
+        # internet access needed, and the version matches the cluster). Dev Spaces mounts a
+        # kubeconfig with the user's own token, so oc acts as the signed-in user. With external
+        # OIDC that token is not refreshed: oc works for about 5 minutes after the workspace starts.
+        if ! command -v oc >/dev/null 2>&1; then
+          dl="${OC_DOWNLOAD_URL:-http://downloads.openshift-console.svc/amd64/linux/oc.rhel9.tar}"
+          # The tar holds one binary (named oc.rhel9 for the rhel9 build): extract it as "oc".
+          if curl -sf --max-time 180 "$dl" | tar -xOf - > /opt/app-root/bin/oc 2>/dev/null && [ -s /opt/app-root/bin/oc ]; then
+            chmod +x /opt/app-root/bin/oc && ln -sf oc /opt/app-root/bin/kubectl
+            log "installed $(oc version --client 2>/dev/null | head -1)"
+          else
+            log "could not download oc from $dl (set OC_DOWNLOAD_URL); continuing without it"
+          fi
+        fi
         log "ready: open a terminal and run 'cd $work && opencode'"
         } > /tmp/opencode-setup.log 2>&1
   # Runs OpenCode interactively in an editor terminal.
