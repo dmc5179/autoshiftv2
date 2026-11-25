@@ -43,6 +43,27 @@ hubClusterSets:
                   maxAllowed:
                     memory: '1Gi'
                   controlledValues: 'RequestsAndLimits'
+          # maas-controller: UNSUPPORTED workaround (2026-11-24). RHOAI 3.5.2 ships it with 64Mi request /
+          # 512Mi limit; on this ACM hub its ~40 cluster-wide informers fill 512Mi during cache sync, the
+          # liveness probe times out and it crash-loops (exit 137). The operator owns the Deployment, so a
+          # VPA again. Ratio 1:8, so minAllowed 192Mi request gives a 1.5Gi limit. Initial mode: delete
+          # the pod once after the VPA exists. Remove when RHOAI raises the default or makes it settable.
+          maas-controller:
+            namespace: 'redhat-ods-applications'
+            targetRef:
+              apiVersion: 'apps/v1'
+              kind: 'Deployment'
+              name: 'maas-controller'
+            updateMode: 'Initial'
+            resourcePolicy:
+              containerPolicies:
+                - containerName: 'manager'
+                  minAllowed:
+                    cpu: '10m'
+                    memory: '192Mi'
+                  maxAllowed:
+                    memory: '512Mi'
+                  controlledValues: 'RequestsAndLimits'
       hermesAgent:
         model: 'qwen3-8b'
       # OpenCode sample on the Dev Spaces dashboard. The MaaS host is read from the
