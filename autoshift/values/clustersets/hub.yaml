@@ -64,6 +64,27 @@ hubClusterSets:
                   maxAllowed:
                     memory: '512Mi'
                   controlledValues: 'RequestsAndLimits'
+      # Dev Spaces signs in through Keycloak (the cluster uses external OIDC since 2026-11-24). From the
+      # Dev Spaces 3.28+ install guide, "Use an external identity provider for authentication". Created
+      # by hand, not here: Keycloak client "devspaces" (redirect <cheURL>/oauth/callback), Secret
+      # openshift-devspaces/oauth-secret (key oAuthSecret), ConfigMap openshift-devspaces/keycloak-certs
+      # (ingress CA, labelled ca-bundle), and "devspaces" in the Authentication audiences.
+      dev-spaces:
+        checluster:
+          networking:
+            auth:
+              oAuthClientName: 'devspaces'
+              oAuthSecret: 'oauth-secret'
+              identityProviderURL: 'https://keycloak-keycloak-oidc-test.apps.rhoai.sandbox141.opentlc.com/realms/rhoai'
+              gateway:
+                oAuthProxy:
+                  cookieExpireSeconds: 300
+                deployment:
+                  containers:
+                    - name: 'oauth-proxy'
+                      env:
+                        - name: 'OAUTH2_PROXY_CODE_CHALLENGE_METHOD'
+                          value: 'S256'
       hermesAgent:
         model: 'qwen3-8b'
       # OpenCode sample on the Dev Spaces dashboard. The MaaS host is read from the
