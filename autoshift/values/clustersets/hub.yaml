@@ -133,6 +133,41 @@ hubClusterSets:
         # Smaller tool results than the server's 30000 characters, for the small
         # model's context and for tool-result inspection.
         maxResponseChars: 12000
+      # The shared MCP gateway (mcp-gateway label): one endpoint, mcp.<apps domain>, that
+      # federates the tools of the servers below. Callers authenticate with an OpenShift or
+      # ServiceAccount token (TokenReview). Tool-level authorization is off for now, so any
+      # authenticated caller may list and call every tool; turning it on needs the signing
+      # key pair Secrets (policies/stable/mcp-gateway/README.md).
+      mcpGateway:
+        gateway:
+          auth:
+            type: 'kubernetes'
+            audiences:
+              - 'https://kubernetes.default.svc'
+          toolAuthorization:
+            enabled: false
+        servers:
+          # Offline Red Hat docs: the RHEL Knowledge Bridge from rhokp-mcp. Its
+          # NetworkPolicy already admits openshift-ingress and mcp-gateway.
+          - name: 'rhokp-docs'
+            namespace: 'rhokp'
+            service: 'rhokp-mcp'
+            port: 8000
+            prefix: 'rhokp_'
+            category:
+              - 'knowledge'
+            hint: 'Search Red Hat documentation, solutions, CVEs and errata (offline)'
+          # MCP server for Red Hat OpenShift (Technology Preview), installed out of band
+          # from the documented Helm chart (redhat-openshift-mcp-server): read-only, view
+          # role, Secrets denied, no Route.
+          - name: 'openshift-mcp'
+            namespace: 'openshift-mcp-server'
+            service: 'openshift-mcp-server-redhat-openshift-mcp-server'
+            port: 8080
+            prefix: 'openshift_'
+            category:
+              - 'platform'
+            hint: 'Read-only OpenShift cluster tools'
         # Lightspeed calls the knowledge bridge directly while the MCP gateway is
         # blocked, so its namespace must be let through the bridge's NetworkPolicy.
         # Remove this once Lightspeed goes through the gateway.
@@ -572,9 +607,11 @@ hubClusterSets:
       openshift-lightspeed: 'true'
       # Offline Red Hat docs for Lightspeed: RHOKP and the knowledge bridge (community
       # tier; the access key Secret first). About 1 CPU, 2-4 GiB and tens of GiB of
-      # node ephemeral storage for RHOKP. The mcp-gateway label stays off until the
-      # gateway controller is fixed.
+      # node ephemeral storage for RHOKP.
       rhokp-mcp: 'true'
+      # The shared MCP gateway (config.mcpGateway). Its controller's crash loop
+      # (CONNLINK-2025) is handled by the mcp-gateway-controller VPA rule above.
+      mcp-gateway: 'true'
       openshift-lightspeed-subscription-name: lightspeed-operator
       openshift-lightspeed-channel: stable
       openshift-lightspeed-source: redhat-operators
