@@ -227,6 +227,10 @@ object-templates-raw: |
           sectionName: mcp
         # The broker reaches registered servers back through the Gateway, on the shared port.
         privateHost: http://{{hub $name hub}}-{{hub $gwClass hub}}.{{hub $gwNs hub}}.svc.cluster.local:{{hub $port hub}}
+        # Required because the mcp listener has no hostname: without it the extension is not
+        # Ready, and the controller writes no router EnvoyFilter, so every tools/call reaches the
+        # broker and fails with "doesn't forward tool calls". Also the hostname of the /mcp route.
+        publicHost: {{hub if $host hub}}{{hub $host hub}}{{hub else hub}}mcp.{{ $domain }}{{hub end hub}}
         logLevel: {{hub (dig "logLevel" "info" $gw) hub}}
         {{hub- if eq $authType "jwt" hub}}
         oauthProtectedResource:
