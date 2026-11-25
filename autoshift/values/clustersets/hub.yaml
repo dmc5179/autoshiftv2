@@ -572,7 +572,8 @@ hubClusterSets:
       gitops-workloads: 'false'
       # HTPasswd identity provider + the maas-users group. Reads
       # config.htpasswdUsers above.
-      htpasswd-users: 'true'
+      # Off since 2026-11-24: the cluster uses external OIDC (Keycloak); the user/group APIs are gone.
+      htpasswd-users: 'false'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator
