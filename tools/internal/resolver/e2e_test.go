@@ -314,6 +314,14 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	assertContains("stable/cluster-install", "-vsphere-creds",
 		"vmware path must render (vSphere credentials Secret) — _example-cluster-install-vmware.yaml + vsphere-creds testdata")
 
+	// group-rbac: the example groups must render their bindings. The policy
+	// fails on missing config rather than skipping, so these catch a silently
+	// empty config.group-rbac in the example files too.
+	assertContains("stable/group-rbac", "group-rbac-cluster-admins-cluster-admin",
+		"the example cluster-admins clusterRoles entry must render its ClusterRoleBinding")
+	assertContains("stable/group-rbac", "group-rbac-maas-users-view",
+		"the example maas-users namespaceRoles entry must render its RoleBinding")
+
 	// ---- Generic install-config invariants (platform-agnostic) -------------
 	// The cluster-install policy renders one base64-encoded install-config
 	// Secret per example file (keyed lint-cluster-<variant>). Decode them all

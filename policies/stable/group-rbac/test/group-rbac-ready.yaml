@@ -1,0 +1,47 @@
+# Are the bindings actually on the cluster, as opposed to configured?
+#
+# inform-only. The enforcing policy owns the bindings with mustonlyhave and reports drift itself;
+# this names what is missing, per group and role, as an assertion that survives pruneObjectBehavior
+# None - a binding deleted by hand shows up here even when nothing else is wrong.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "group-rbac") hub}}
+  {{hub- if not $cfg hub}}
+  {{hub- fail "group-rbac: config.group-rbac is missing or empty in the rendered-config ConfigMap" hub}}
+  {{hub- end hub}}
+  {{hub- range $g := (dig "groups" (list) $cfg) hub}}
+  {{hub- $gname := (dig "name" "" $g) hub}}
+  {{hub- if not $gname hub}}
+  {{hub- fail "group-rbac: every config.group-rbac.groups entry needs a name" hub}}
+  {{hub- end hub}}
+  {{hub- range $role := (dig "clusterRoles" (list) $g) hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: group-rbac-{{hub $gname hub}}-{{hub $role hub}}
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: {{hub $gname hub}}
+  {{hub- end hub}}
+  {{hub- range $nr := (dig "namespaceRoles" (list) $g) hub}}
+  {{hub- $ns := (dig "namespace" "" $nr) hub}}
+  {{hub- $role := (dig "role" "" $nr) hub}}
+  {{hub- if not (and $ns $role) hub}}
+  {{hub- fail (printf "group-rbac: group %s has a namespaceRoles entry without both namespace and role" $gname) hub}}
+  {{hub- end hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: group-rbac-{{hub $gname hub}}-{{hub $role hub}}
+        namespace: {{hub $ns hub}}
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: {{hub $gname hub}}
+  {{hub- end hub}}
+  {{hub- end hub}}

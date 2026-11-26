@@ -76,6 +76,26 @@ hubClusterSets:
                 role: view
 
       # =======================================================================
+      # group-rbac — role bindings for identity-provider groups (DATA; the ENABLE
+      # flag is the group-rbac label below).
+      # =======================================================================
+      # Binds groups to roles without creating Group objects. Written for
+      # clusters signed in through an external OIDC provider, which have no
+      # user.openshift.io API for htpasswd-users to declare Groups in: the
+      # binding subjects resolve against the token's groups claim instead.
+      # Required when the group-rbac label is on; each group needs a name and
+      # at least one role binding.
+      group-rbac:
+        groups:
+          - name: cluster-admins
+            clusterRoles:
+              - cluster-admin
+          - name: maas-users
+            namespaceRoles:
+              - namespace: llm
+                role: view
+
+      # =======================================================================
       # gitops-workloads — workloads deployed from their own repositories (DATA; the ENABLE
       # flag is the gitops-workloads label below).
       # =======================================================================
@@ -3280,6 +3300,15 @@ hubClusterSets:
       # Secret in openshift-config created out of band - the password hashes
       # are never in git. The provider is only added once that Secret exists.
       htpasswd-users: 'false'
+
+      # =======================================================================
+      # Group RBAC
+      # =======================================================================
+      # Binds identity-provider groups to roles without creating Group
+      # objects. Needs config.group-rbac above. For clusters signed in
+      # through an external OIDC provider, which have no user.openshift.io
+      # API: this replaces the bindings half of htpasswd-users.
+      group-rbac: 'true'
 
       # =======================================================================
       # Agent sandboxing (OpenShell prerequisites)

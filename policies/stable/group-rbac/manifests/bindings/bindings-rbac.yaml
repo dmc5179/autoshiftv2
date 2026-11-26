@@ -1,0 +1,73 @@
+# Role bindings for identity-provider groups, with no Group objects.
+#
+# For a cluster signed in through an external OIDC provider there is no user.openshift.io API, so
+# Groups cannot be created and the htpasswd-users policy cannot run. Group membership still
+# reaches the API server - in the token's groups claim - and RBAC binds to those group names
+# directly. This policy does only the bindings. Use it instead of the bindings half of
+# htpasswd-users; binding names are prefixed group-rbac- rather than htpasswd- so the two policies
+# never fight over the same object.
+#
+# Each config.group-rbac.groups entry needs a name and at least one role: clusterRoles lists
+# ClusterRole names bound cluster-wide, namespaceRoles lists {namespace, role} pairs binding a
+# ClusterRole inside one namespace. mustonlyhave, because the lists are the whole truth: a role
+# removed from config must leave the cluster. The policy owns these bindings outright.
+#
+# Fails, rather than rendering nothing, when config.group-rbac is missing or empty, when a group
+# has no name, when a group has neither clusterRoles nor namespaceRoles, or when a namespaceRoles
+# entry lacks a namespace or a role.
+#
+# A RoleBinding into a namespace that does not exist yet reports NonCompliant until that namespace
+# appears, then reconciles on its own. It is not an error worth acting on.
+object-templates-raw: |
+  {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
+  {{hub- $cfg := (index ($raw | fromYaml | default dict) "group-rbac") hub}}
+  {{hub- if not $cfg hub}}
+  {{hub- fail "group-rbac: config.group-rbac is missing or empty in the rendered-config ConfigMap" hub}}
+  {{hub- end hub}}
+  {{hub- range $g := (dig "groups" (list) $cfg) hub}}
+  {{hub- $gname := (dig "name" "" $g) hub}}
+  {{hub- if not $gname hub}}
+  {{hub- fail "group-rbac: every config.group-rbac.groups entry needs a name" hub}}
+  {{hub- end hub}}
+  {{hub- if and (not (dig "clusterRoles" (list) $g)) (not (dig "namespaceRoles" (list) $g)) hub}}
+  {{hub- fail (printf "group-rbac: group %s has neither clusterRoles nor namespaceRoles" $gname) hub}}
+  {{hub- end hub}}
+  {{hub- range $role := (dig "clusterRoles" (list) $g) hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: group-rbac-{{hub $gname hub}}-{{hub $role hub}}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: {{hub $role hub}}
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: {{hub $gname hub}}
+  {{hub- end hub}}
+  {{hub- range $nr := (dig "namespaceRoles" (list) $g) hub}}
+  {{hub- $ns := (dig "namespace" "" $nr) hub}}
+  {{hub- $role := (dig "role" "" $nr) hub}}
+  {{hub- if not (and $ns $role) hub}}
+  {{hub- fail (printf "group-rbac: group %s has a namespaceRoles entry without both namespace and role" $gname) hub}}
+  {{hub- end hub}}
+  - complianceType: mustonlyhave
+    objectDefinition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: group-rbac-{{hub $gname hub}}-{{hub $role hub}}
+        namespace: {{hub $ns hub}}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: {{hub $role hub}}
+      subjects:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: {{hub $gname hub}}
+  {{hub- end hub}}
+  {{hub- end hub}}
