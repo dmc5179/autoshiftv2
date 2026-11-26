@@ -172,6 +172,12 @@ The internal listener accepts routes only from the gateway namespace, the namesp
 configured servers, and `extraRouteNamespaces`, never from all namespaces. It is served by the same
 Gateway Service as the public listener.
 
+If the `mcp` listener's port changes, Connectivity Link 1.5.0's MCP Gateway controller does not
+update the router EnvoyFilter it created (`mcp-ext-proc-<name>-gateway` in `openshift-ingress`). It
+keeps the old `portNumber`, the router no longer sees tool calls, and every `tools/call` reaches the
+broker and fails with "does not forward tool calls". Delete that EnvoyFilter; the controller recreates
+it from the current listener once the `MCPGatewayExtension` is Ready.
+
 ## Registering servers from the MCP catalog
 
 The MCP Lifecycle Operator deploys a catalog server as an `MCPServer` with a Deployment and a
@@ -283,3 +289,18 @@ oc get mcpvirtualservers.mcp.kuadrant.io -A
 oc get gateways.gateway.networking.k8s.io -n openshift-ingress
 oc get authpolicies.kuadrant.io -n openshift-ingress
 ```
+
+### Call the gateway
+
+The gateway's `/mcp` route answers only for the public host, so in-cluster or port-forwarded calls need that Host header:
+
+```bash
+oc port-forward -n openshift-ingress svc/<name>-openshift-default 8080:8080 &
+TOKEN=$(oc create token <serviceaccount> -n <namespace> --duration=10m)
+H=(-H "Host: mcp.<ingress domain>" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream")
+curl -s -D - -o /dev/null "${H[@]}" http://localhost:8080/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check","version":"1"}}}' | grep -i mcp-session-id
+# then send notifications/initialized and tools/list with -H "Mcp-Session-Id: <id>"
+```
+
+Without a token the endpoint answers 401. A `tools/call` answered by the broker with "does not forward
+tool calls" means the router EnvoyFilter is missing (see below).
