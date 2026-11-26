@@ -100,6 +100,19 @@ oc label secret argocd-oidc -n openshift-gitops app.kubernetes.io/part-of=argocd
 Keycloak rejects a scope it does not know, so the realm needs a `groups` client scope (with a group
 membership mapper, full group path off) assigned to the client.
 
+Switching an instance that already exists takes two manual steps. The policy uses `musthave`,
+which adds fields and never removes them, so the old `spec.sso` stays and the API server rejects
+the update ("spec.sso and spec.oidcConfig cannot both be set"; the policy reports the ArgoCD
+"cannot be updated"). Remove it once, and the policy adds `spec.oidcConfig` at its next evaluation:
+
+```bash
+oc patch argocds.argoproj.io <instance> -n <namespace> --type=json -p '[{"op":"remove","path":"/spec/sso"}]'
+```
+
+Then restart the instance's server Deployment (`<instance>-server`). Until it restarts, a sign-in
+completes at the provider but every session fails with `x509: certificate signed by unknown
+authority`, because the server keeps a provider client built before `rootCA` arrived.
+
 One risk to respect: never set `config.gitops.infra.disableAdmin` until SSO sign-in is proven in a
 browser. The local admin account is the only way in when the issuer URL, the CA or the groups claim
 is wrong, and the policy will keep reporting the ArgoCD CR applied either way.
