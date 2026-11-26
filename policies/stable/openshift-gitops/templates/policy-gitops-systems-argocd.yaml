@@ -167,9 +167,22 @@ spec:
             {{ "{{hub-" }} $applicationSet := (index $infra "applicationSet" | default dict) {{ "hub}}" }}
             {{ "{{hub-" }} $applicationSetLimits := (index $applicationSet "limits" | default dict) {{ "hub}}" }}
             {{ "{{hub-" }} $applicationSetRequests := (index $applicationSet "requests" | default dict) {{ "hub}}" }}
+            {{/* Sign-in through an OIDC provider (config.gitops.sso) replaces the Dex stanza: a
+                 cluster using external OIDC authentication has no OAuth server for Dex's OpenShift
+                 connector, and spec.sso cannot coexist with spec.oidcConfig in the ArgoCD CR. */}}
+            {{ "{{hub-" }} $sso := (index (index $cfg "gitops" | default dict) "sso" | default dict) {{ "hub}}" }}
+            {{ "{{hub-" }} $ssoMode := (index $sso "mode" | default "") {{ "hub}}" }}
+            {{ "{{hub-" }} if and (eq $ssoMode "oidc") (not (and (index $sso "issuer") (index $sso "clientID"))) {{ "hub}}" }}
+            {{ "{{hub-" }} fail (printf "config.gitops.sso.mode is 'oidc', so config.gitops.sso needs both issuer and clientID (cluster %s)" .ManagedClusterName) {{ "hub}}" }}
+            {{ "{{hub-" }} end {{ "hub}}" }}
             {{ "{{hub-" }} $rbac := "" {{ "hub}}" }}
             {{ "{{hub-" }} range (index $infra "rbac_policies" | default (list{{ range $.Values.gitops.rbac_policies }} {{ . | quote }}{{ end }})) {{ "hub}}" }}
             {{ "{{hub-" }} $rbac = printf "%s%s\n" $rbac . {{ "hub}}" }}
+            {{ "{{hub-" }} end {{ "hub}}" }}
+            {{/* Identity-provider groups worth admin on Argo CD. Appended to the lines above, never
+                 replacing them: an empty list changes nothing. */}}
+            {{ "{{hub-" }} range (index $sso "adminGroups" | default list) {{ "hub}}" }}
+            {{ "{{hub-" }} $rbac = printf "%sg, %s, role:admin\n" $rbac . {{ "hub}}" }}
             {{ "{{hub-" }} end {{ "hub}}" }}
             {{/* The CMP sidecar image is the SAME image as the running argocd-repo-server (operator-set),
                  resolved via a SPOKE-side lookup ({{ }}) — config-policy-controller runs it on the managed
@@ -278,6 +291,29 @@ spec:
                   # to replace it wholesale.
                   resourceExclusions: |
                     {{ "{{hub" }} (index $infra "resourceExclusions" | default {{ $.Values.gitops.resourceExclusions | toJson }}) | autoindent {{ "hub}}" }}
+                  {{ "{{hub-" }} if eq $ssoMode "oidc" {{ "hub}}" }}
+                  # Sign-in through the OIDC provider instead of Dex. spec.sso and spec.oidcConfig
+                  # are mutually exclusive, so the Dex stanza is left out entirely. The client
+                  # secret never comes from values: it is a key in this instance namespace's
+                  # argocd-secret, named by the $oidc.<key> reference below.
+                  oidcConfig: |
+                    name: {{ "{{hub" }} index $sso "name" | default "OIDC provider" {{ "hub}}" }}
+                    issuer: {{ "{{hub" }} index $sso "issuer" {{ "hub}}" }}
+                    clientID: {{ "{{hub" }} index $sso "clientID" {{ "hub}}" }}
+                    clientSecret: $oidc.{{ "{{hub" }} index $sso "clientSecretKey" | default "clientSecret" {{ "hub}}" }}
+                    {{ "{{hub-" }} if (index $sso "rootCA") {{ "hub}}" }}
+                    rootCA: |
+                      {{ "{{hub" }} (index $sso "rootCA") | autoindent {{ "hub}}" }}
+                    {{ "{{hub-" }} end {{ "hub}}" }}
+                    requestedScopes:
+                      - openid
+                      - profile
+                      - email
+                      - groups
+                    requestedIDTokenClaims:
+                      groups:
+                        essential: true
+                  {{ "{{hub-" }} else {{ "hub}}" }}
                   sso:
                     dex:
                       resources:
@@ -289,6 +325,7 @@ spec:
                           memory: {{ "{{hub" }} index $dexRequests "memory" | default "{{ $.Values.gitops.dex.requests.memory }}" {{ "hub}}" }}
                       openShiftOAuth: true
                     provider: dex
+                  {{ "{{hub-" }} end {{ "hub}}" }}
                   rbac:
                     defaultPolicy: ''
                     # Every line comes from config.gitops.infra.rbac_policies, falling back to this

@@ -1995,6 +1995,25 @@ hubClusterSets:
         # infra-gitops instance). Drives gitops-disable-default-argocd (disable = not defaultInstance).
         # defaultInstance: false
         #
+        # Sign-in through an OIDC provider instead of Dex. For clusters on external OIDC
+        # authentication, which have no OAuth server for Dex's OpenShift connector, and on which the
+        # GitOps operator no longer deploys Dex. spec.sso and spec.oidcConfig are mutually exclusive,
+        # so mode 'oidc' drops the Dex stanza and writes spec.oidcConfig instead. The client secret
+        # never lives here: create a key in the instance namespace's argocd-secret, named
+        # oidc.clientSecret unless clientSecretKey says otherwise.
+        sso:
+          mode: 'oidc'
+          issuer: 'https://keycloak.example.com/realms/example'
+          clientID: 'argocd'
+          # The CA that signed the issuer's certificate, as PEM, when it is not publicly trusted.
+          rootCA: |
+            -----BEGIN CERTIFICATE-----
+            MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQsFADBaMQ
+            -----END CERTIFICATE-----
+          # Identity-provider groups to grant role:admin on Argo CD, on top of gitops.infra.rbac_policies.
+          adminGroups:
+            - 'cluster-admins'
+        #
         # Infra GitOps. agent configures AutoShift's infra Argo CD agent, and is DATA only: the
         # gitops-agent label switches it on.
         infra:

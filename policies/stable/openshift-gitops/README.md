@@ -63,3 +63,33 @@ folded scalar, hub templates have no comment syntax, and a `#` line there is fol
 
 See [Argo CD agent](../../../docs/gitops-agent.md) for the user-facing guide and
 [gitops-dev](../gitops-dev/README.md) for the per-team agents.
+
+## Sign-in through an OIDC provider
+
+Set `config.gitops.sso.mode: 'oidc'` to sign users in through the cluster's OIDC provider (Keycloak)
+instead of Dex. A cluster on external OIDC authentication has no OAuth server, which is what
+Dex's OpenShift connector talks to, and from OpenShift GitOps 1.20 the operator does not deploy Dex
+there at all. `spec.sso` and `spec.oidcConfig` are mutually exclusive in the ArgoCD CR, so the oidc
+mode drops the Dex stanza entirely and writes `spec.oidcConfig` from the block below.
+
+| Key | Notes |
+|---|---|
+| `mode` | `'oidc'` to switch; anything else renders today's Dex stanza |
+| `issuer` | required with `clientID`; the provider's issuer URL |
+| `clientID` | required with `issuer` |
+| `clientSecretKey` | optional; names the argocd-secret key the `$oidc.<key>` reference resolves, default `clientSecret` |
+| `rootCA` | optional PEM of the CA signing the issuer's certificate, when not publicly trusted |
+| `adminGroups` | optional list of identity-provider groups granted `role:admin` in `rbac.policy`, on top of `gitops.infra.rbac_policies` |
+
+Mode `oidc` with a missing `issuer` or `clientID` fails the template render.
+
+The Keycloak client is confidential: standard flow on, direct access grants off, and a redirect URI
+of `https://<argocd route host>/auth/callback`. Request the `groups` scope so group names arrive in
+the token's `groups` claim, which is what `rbac.scopes: '[groups]'` reads. The client secret value
+never comes from values: create a key in the instance namespace's `argocd-secret` (named
+`oidc.clientSecret` unless `clientSecretKey` says otherwise), or use the operator's documented
+secret mechanism.
+
+One risk to respect: never set `config.gitops.infra.disableAdmin` until SSO sign-in is proven in a
+browser. The local admin account is the only way in when the issuer URL, the CA or the groups claim
+is wrong, and the policy will keep reporting the ArgoCD CR applied either way.
