@@ -12,6 +12,12 @@
 #              user's own token, so its ServiceAccount needs no cluster-wide permissions. The
 #              proxy passes the user to Open WebUI in trusted headers, so Open WebUI listens on
 #              127.0.0.1 only: anything that reached its port directly could forge them.
+#   oidc       An external OpenID Connect provider, such as Keycloak, through Open WebUI's own
+#              OAuth login; no proxy. Open WebUI's role management reads the groups claim:
+#              members of adminGroups become administrators, members of allowedGroups users,
+#              and anyone else is refused. The client secret comes from a Secret an
+#              administrator creates (clientSecretRef). OAuth settings are read from the
+#              environment at every start; see the note on ENABLE_PERSISTENT_CONFIG below.
 #
 # Credentials, none of which come from git:
 #   - the key it presents to Hermes is copied on the managed cluster from the hermes-api-key
@@ -20,7 +26,9 @@
 #     through WEBUI_SECRET_KEY_FILE;
 #   - local: the administrator password comes from a Secret an administrator creates;
 #   - openshift: the proxy's cookie secret is generated at pod start, and the administrator
-#     account, which signs in through OpenShift, gets a random password nobody ever needs.
+#     account, which signs in through OpenShift, gets a random password nobody ever needs;
+#   - oidc: the OAuth client secret comes from a Secret an administrator creates, and the
+#     administrator account gets a random password, as with openshift.
 #
 # OpenShift notes, each reproduced under an arbitrary UID before it was fixed:
 #   - the image is built to run as root with HOME=/root (mode 700), so HOME is moved to /tmp;
@@ -37,10 +45,12 @@
 #
 # Most settings below are read by Open WebUI only on its FIRST start and then stored in its
 # database, where the Admin Panel owns them. Changing them here later changes nothing. The
-# exception is maas: a key that renews must reach Open WebUI at every start, so with maas set
-# ENABLE_PERSISTENT_CONFIG is False and the environment wins at every start. Admin Panel changes
-# to settings then last only until the pod restarts. Users, chats and per-model settings are not
-# settings in that sense and are kept.
+# exceptions are maas and oidc. A key that renews must reach Open WebUI at every start, and so
+# must the sign-in settings that decide who gets in, so with either set ENABLE_PERSISTENT_CONFIG
+# is False and the environment wins at every start. Admin Panel changes to settings then last only
+# until the pod restarts. Users, chats and per-model settings are not settings in that sense and
+# are kept. Open WebUI never stores its oauth.* settings unless ENABLE_OAUTH_PERSISTENT_CONFIG is
+# set, but the login form and the default role are ordinary settings.
 object-templates-raw: |
   {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
   {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
@@ -57,14 +67,29 @@ object-templates-raw: |
   {{hub- $adminSecret := (dig "adminSecretRef" "name" "open-webui-admin" $o) hub}}
   {{hub- $adminKey := (dig "adminSecretRef" "key" "password" $o) hub}}
   {{hub- $auth := (dig "auth" "local" $o) hub}}
-  {{hub- if not (has $auth (list "local" "openshift")) hub}}{{hub fail (printf "open-webui: config.openWebui.auth %s must be local or openshift" $auth) hub}}{{hub- end hub}}
+  {{hub- if not (has $auth (list "local" "openshift" "oidc")) hub}}{{hub fail (printf "open-webui: config.openWebui.auth %s must be local, openshift or oidc" $auth) hub}}{{hub- end hub}}
   {{hub- $openshift := eq $auth "openshift" hub}}
+  {{hub- $oidc := eq $auth "oidc" hub}}
+  {{hub- $sso := or $openshift $oidc hub}}
   {{hub- $groups := (dig "allowedGroups" (list "maas-users") $o) hub}}
-  {{hub- if and $openshift (not $groups) hub}}{{hub fail "open-webui: config.openWebui.allowedGroups must name at least one group when auth is openshift" hub}}{{hub- end hub}}
+  {{hub- if and $sso (not $groups) hub}}{{hub fail (printf "open-webui: config.openWebui.allowedGroups must name at least one group when auth is %s" $auth) hub}}{{hub- end hub}}
+  {{hub- $issuer := (trimSuffix "/" (dig "issuerUrl" "" $o)) hub}}
+  {{hub- $clientId := (dig "clientId" "open-webui" $o) hub}}
+  {{hub- $clientSecret := (dig "clientSecretRef" "name" "open-webui-oidc" $o) hub}}
+  {{hub- $clientSecretKey := (dig "clientSecretRef" "key" "client-secret" $o) hub}}
+  {{hub- $providerName := (dig "providerName" "Keycloak" $o) hub}}
+  {{hub- $scopes := (dig "scopes" "openid email profile" $o) hub}}
+  {{hub- $adminGroups := (dig "adminGroups" (list) $o) hub}}
+  {{hub- if $oidc hub}}
+  {{hub- if not $issuer hub}}{{hub fail "open-webui: config.openWebui.issuerUrl is required when auth is oidc, for example https://keycloak.apps.example.com/realms/myrealm" hub}}{{hub- end hub}}
+  {{hub- if not (hasPrefix "https://" $issuer) hub}}{{hub fail (printf "open-webui: config.openWebui.issuerUrl %s must start with https://" $issuer) hub}}{{hub- end hub}}
+  {{hub- if not $adminGroups hub}}{{hub fail "open-webui: config.openWebui.adminGroups must name at least one group when auth is oidc; role management resets every role at sign-in, so without it nobody stays an administrator" hub}}{{hub- end hub}}
+  {{hub- end hub}}
   {{hub- $proxyImageCfg := (dig "proxyImage" "" $o) hub}}
   {{hub- $m := (index $cfg "openshiftAiModels" | default dict) hub}}
   {{hub- $maasModel := (dig "maas" "model" "" $o) hub}}
   {{hub- $maas := ne $maasModel "" hub}}
+  {{hub- $ingressCa := or $maas $oidc hub}}
   {{hub- $modelNs := (dig "namespace" "" $m) hub}}
   {{hub- $ttl := (dig "maas" "keyTtl" "720h" $o) hub}}
   {{hub- $renew := (dig "maas" "renewBefore" "168h" $o) hub}}
@@ -200,6 +225,19 @@ object-templates-raw: |
           name: '{{hub $g hub}}'
         {{hub- end hub}}
   {{hub- end hub}}
+  {{hub- if $ingressCa hub}}
+  # The CA that signs the router's default certificate, which the MaaS gateway and an
+  # in-cluster OpenID Connect provider such as Keycloak present. build-trust-bundle appends it
+  # to the system trust store.
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: open-webui-ingress-ca
+        namespace: '{{hub $ns hub}}'
+      data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'
+  {{hub- end hub}}
   {{hub- if $maas hub}}
   {{hub- if not $openshift hub}}
   # The identity that mints the MaaS key. With auth openshift the pod already runs as
@@ -252,16 +290,6 @@ object-templates-raw: |
         - kind: ServiceAccount
           name: '{{hub $sa hub}}'
           namespace: '{{hub $ns hub}}'
-  # The CA that signs the MaaS gateway certificate, as for Hermes. build-trust-bundle appends it
-  # to the system trust store.
-  - complianceType: musthave
-    objectDefinition:
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: open-webui-ingress-ca
-        namespace: '{{hub $ns hub}}'
-      data: '{{ copyConfigMapData "openshift-config-managed" "default-ingress-cert" }}'
   # The startup wrapper. A ConfigMap change does not restart the pod; bump
   # autoshift.io/open-webui-bootstrap-revision on the Deployment's pod template when this changes.
   - complianceType: mustonlyhave
@@ -342,8 +370,9 @@ object-templates-raw: |
           if [[ -n "${SSL_CERT_FILE:-}" && -r "${SSL_CERT_FILE}" ]]; then
               curl_tls=(--cacert "$SSL_CERT_FILE")
           fi
-          # The administrator signs in through OpenShift, so its password is never used, but
-          # Open WebUI needs one to create the account: a random one, kept nowhere.
+          # The administrator signs in through OpenShift or the OpenID Connect provider, so its
+          # password is never used, but Open WebUI needs one to create the account: a random
+          # one, kept nowhere.
           if [[ "${OWUI_RANDOM_ADMIN_PASSWORD:-}" == true ]]; then
               WEBUI_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | base64)"
               export WEBUI_ADMIN_PASSWORD
@@ -603,7 +632,7 @@ object-templates-raw: |
                   - name: proxy-cookie
                     mountPath: /cookie
               {{hub- end hub}}
-              {{hub- if $maas hub}}
+              {{hub- if $ingressCa hub}}
               # SSL_CERT_FILE replaces the trust store rather than adding to it, so the bundle
               # must hold the public CAs as well as the ingress CA. The image is Debian-based.
               - name: build-trust-bundle
@@ -642,10 +671,11 @@ object-templates-raw: |
                 command:
                   - /bin/bash
                   - /opt/open-webui-bootstrap/open-webui-bootstrap.sh
-                {{hub- else if and $openshift $adminEmail hub}}
-                # The administrator signs in through OpenShift, as the account whose email is
-                # adminEmail, so its password is never used. Open WebUI still needs one to create
-                # the account, so a random one is made here and kept nowhere.
+                {{hub- else if and $sso $adminEmail hub}}
+                # The administrator signs in through OpenShift or the OpenID Connect provider, as
+                # the account whose email is adminEmail, so its password is never used. Open
+                # WebUI still needs one to create the account, so a random one is made here and
+                # kept nowhere.
                 command:
                   - /bin/bash
                   - -c
@@ -680,14 +710,15 @@ object-templates-raw: |
                   # that stored value no longer applies. Left at its default of true, the signup
                   # form would let anyone who reaches the UI register a password account under an
                   # address nobody has used yet, and be that user when its owner signs in. Trusted
-                  # header sign-in does not consult this flag, so OpenShift users still get in.
+                  # header sign-in and OAuth sign-up do not consult this flag, so users of the
+                  # other sign-in modes still get in.
                   - name: ENABLE_SIGNUP
                     value: 'False'
                   - name: SSL_CERT_FILE
                     value: /etc/open-webui/ca/ca-bundle.crt
                   - name: REQUESTS_CA_BUNDLE
                     value: /etc/open-webui/ca/ca-bundle.crt
-                  {{hub- if and $openshift $adminEmail hub}}
+                  {{hub- if and $sso $adminEmail hub}}
                   - name: OWUI_RANDOM_ADMIN_PASSWORD
                     value: 'true'
                   {{hub- end hub}}
@@ -700,6 +731,60 @@ object-templates-raw: |
                       secretKeyRef:
                         name: open-webui-hermes
                         key: OPENAI_API_KEY
+                  {{hub- if $oidc hub}}
+                  # The sign-in settings below must apply at every start, also on an install whose
+                  # database already holds older values, so the environment is authoritative.
+                  - name: ENABLE_PERSISTENT_CONFIG
+                    value: 'False'
+                  - name: ENABLE_SIGNUP
+                    value: 'False'
+                  - name: SSL_CERT_FILE
+                    value: /etc/open-webui/ca/ca-bundle.crt
+                  - name: REQUESTS_CA_BUNDLE
+                    value: /etc/open-webui/ca/ca-bundle.crt
+                  {{hub- end hub}}
+                  {{hub- end hub}}
+                  {{hub- if $oidc hub}}
+                  # Sign-in through the OpenID Connect provider only: no password form, no
+                  # password sign-up. A first sign-in creates the account, or links it to an
+                  # existing account with the same email, such as the one adminEmail created.
+                  - name: ENABLE_LOGIN_FORM
+                    value: 'false'
+                  - name: ENABLE_OAUTH_SIGNUP
+                    value: 'true'
+                  - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
+                    value: 'true'
+                  - name: OAUTH_CLIENT_ID
+                    value: '{{hub $clientId hub}}'
+                  - name: OAUTH_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: '{{hub $clientSecret hub}}'
+                        key: '{{hub $clientSecretKey hub}}'
+                  - name: OPENID_PROVIDER_URL
+                    value: '{{hub $issuer hub}}/.well-known/openid-configuration'
+                  - name: OPENID_REDIRECT_URI
+                    value: 'https://{{ $host }}/oauth/oidc/callback'
+                  - name: OAUTH_PROVIDER_NAME
+                    value: '{{hub $providerName hub}}'
+                  - name: OAUTH_SCOPES
+                    value: '{{hub $scopes hub}}'
+                  - name: OAUTH_CODE_CHALLENGE_METHOD
+                    value: S256
+                  # Who gets in, from the groups claim at every sign-in: adminGroups become
+                  # administrators, allowedGroups users, and a user with groups that match neither
+                  # is refused. A user whose token carries no groups claim at all is not checked,
+                  # so such a user starts as pending until an administrator approves them.
+                  - name: ENABLE_OAUTH_ROLE_MANAGEMENT
+                    value: 'true'
+                  - name: OAUTH_ROLES_CLAIM
+                    value: groups
+                  - name: OAUTH_ALLOWED_ROLES
+                    value: '{{hub join "," $groups hub}}'
+                  - name: OAUTH_ADMIN_ROLES
+                    value: '{{hub join "," $adminGroups hub}}'
+                  - name: DEFAULT_USER_ROLE
+                    value: pending
                   {{hub- end hub}}
                   - name: ENABLE_OPENAI_API
                     value: 'true'
@@ -770,7 +855,7 @@ object-templates-raw: |
                   # exists.
                   - name: WEBUI_ADMIN_EMAIL
                     value: '{{hub $adminEmail hub}}'
-                  {{hub- if not $openshift hub}}
+                  {{hub- if not $sso hub}}
                   # Without the Secret the pod does not start, so the site is never reachable
                   # before its administrator exists.
                   - name: WEBUI_ADMIN_PASSWORD
@@ -860,10 +945,12 @@ object-templates-raw: |
                     mountPath: /app/backend/data
                   - name: tmp
                     mountPath: /tmp
-                  {{hub- if $maas hub}}
+                  {{hub- if $ingressCa hub}}
                   - name: ca
                     mountPath: /etc/open-webui/ca
                     readOnly: true
+                  {{hub- end hub}}
+                  {{hub- if $maas hub}}
                   - name: bootstrap
                     mountPath: /opt/open-webui-bootstrap
                     readOnly: true
@@ -936,7 +1023,7 @@ object-templates-raw: |
                   claimName: open-webui-data
               - name: tmp
                 emptyDir: {}
-              {{hub- if $maas hub}}
+              {{hub- if $ingressCa hub}}
               - name: ingress-ca
                 configMap:
                   name: open-webui-ingress-ca
@@ -945,6 +1032,8 @@ object-templates-raw: |
                       path: ca-bundle.crt
               - name: ca
                 emptyDir: {}
+              {{hub- end hub}}
+              {{hub- if $maas hub}}
               - name: bootstrap
                 configMap:
                   name: open-webui-bootstrap
