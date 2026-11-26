@@ -157,6 +157,12 @@ hubClusterSets:
             category:
               - 'knowledge'
             hint: 'Search Red Hat documentation, solutions, CVEs and errata (offline)'
+            # The knowledge bridge serves 2025 and 2026 MCP but advertises only 2026-07-28, so
+            # without this the gateway lists its tools to 2026 clients only (not to Lightspeed
+            # or the demo, which speak 2025).
+            supportedProtocolVersions:
+              - '2025-11-25'
+              - '2026-07-28'
           # MCP server for Red Hat OpenShift (Technology Preview), installed out of band
           # from the documented Helm chart (redhat-openshift-mcp-server): read-only, view
           # role, Secrets denied, no Route.
