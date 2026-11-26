@@ -106,6 +106,7 @@ Every value in the sample is an example.
 | `gateway.auth.issuerUrl` | | Required with `jwt`. Also advertised as the OAuth authorization server |
 | `gateway.auth.groupsClaim` | `groups` | `jwt` only. The token claim holding the caller's groups |
 | `gateway.auth.usernameClaim` | `preferred_username` | `jwt` only. The token claim matched against `users` |
+| `gateway.authorinoTLS` | `true` | TLS from the gateway to Authorino, see "TLS to Authorino" |
 | `gateway.toolAuthorization.enabled` | `false` | Enforce `servers[].access`. Needs `auth.type` `kubernetes` or `jwt` |
 | `gateway.toolAuthorization.keySecretName` | `mcp-trusted-headers` | Names the key pair Secrets, see below |
 | `gateway.toolAuthorization.kuadrantNamespace` | `kuadrant-system` | Where the private key Secret lives |
@@ -214,9 +215,11 @@ With Red Hat OpenShift AI on the cluster, Authorino serves TLS on its gRPC autho
 Kuadrant generates a plain text connection to it for each Gateway, and RHOAI's
 odh-model-controller patches that to TLS for the MaaS gateway only. Without the same patch every
 authenticated request through this gateway fails with HTTP 500, the Wasm log reports "gRPC status
-code is not OK", and Authorino logs nothing. When `auth.type` is not `none`, this policy creates
-`EnvoyFilter` `<name>-authn-ssl` in `openshift-ingress`, which gives the connection TLS, trusting the
-service CA. It uses Authorino's Service in `toolAuthorization.kuadrantNamespace`.
+code is not OK", and Authorino logs nothing. When `auth.type` is not `none` and
+`gateway.authorinoTLS` is true (the default), this policy creates `EnvoyFilter` `<name>-authn-ssl`
+in `openshift-ingress`, which gives the connection TLS, trusting the service CA. It uses Authorino's
+Service in `toolAuthorization.kuadrantNamespace`. On a cluster where Authorino serves plain gRPC,
+set `gateway.authorinoTLS` to `false`, which skips the EnvoyFilter.
 
 ## Tool authorization
 

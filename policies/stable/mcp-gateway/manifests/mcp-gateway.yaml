@@ -53,6 +53,9 @@ object-templates-raw: |
   {{hub- if and $toolAuthz (eq $authType "none") hub}}{{hub fail "mcp-gateway: toolAuthorization needs an identity, so auth.type cannot be none" hub}}{{hub- end hub}}
   {{hub- $keySecret := (dig "toolAuthorization" "keySecretName" "mcp-trusted-headers" $gw) hub}}
   {{hub- $kuadrantNs := (dig "toolAuthorization" "kuadrantNamespace" "kuadrant-system" $gw) hub}}
+  # Red Hat OpenShift AI turns on TLS for Authorino's gRPC authorization port; set
+  # gateway.authorinoTLS false on a cluster where Authorino serves plain gRPC.
+  {{hub- $authorinoTLS := (ne (printf "%v" (dig "authorinoTLS" true $gw)) "false") hub}}
   {{hub- $servers := (dig "servers" (list) $cfg) hub}}
   {{hub- $virtualServers := (dig "virtualServers" (list) $cfg) hub}}
   {{- /* Identity as each auth.type presents it, for the CEL and Rego below. */}}
@@ -245,7 +248,7 @@ object-templates-raw: |
           secretName: {{hub $keySecret hub}}
           generate: Disabled
         {{hub- end hub}}
-  {{hub- if ne $authType "none" hub}}
+  {{hub- if and (ne $authType "none") $authorinoTLS hub}}
   # TLS from this Gateway to Authorino. With Red Hat OpenShift AI on the cluster, Authorino's
   # gRPC authorization port serves TLS, and the Kuadrant-generated cluster for it is plain
   # text: every check then fails ("gRPC status code is not OK" in the Wasm log, HTTP 500, and
