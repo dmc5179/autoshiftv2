@@ -77,7 +77,7 @@ mode drops the Dex stanza entirely and writes `spec.oidcConfig` from the block b
 | `mode` | `'oidc'` to switch; anything else renders today's Dex stanza |
 | `issuer` | required with `clientID`; the provider's issuer URL |
 | `clientID` | required with `issuer` |
-| `clientSecretKey` | optional; names the argocd-secret key the `$oidc.<key>` reference resolves, default `clientSecret` |
+| `clientSecretRef` | optional; where Argo CD reads the client secret, written as `$<clientSecretRef>`: a key in `argocd-secret` (default `oidc.clientSecret`), or `<secret>:<key>` for a separate Secret |
 | `rootCA` | optional PEM of the CA signing the issuer's certificate, when not publicly trusted |
 | `adminGroups` | optional list of identity-provider groups granted `role:admin` in `rbac.policy`, on top of `gitops.infra.rbac_policies` |
 
@@ -86,9 +86,19 @@ Mode `oidc` with a missing `issuer` or `clientID` fails the template render.
 The Keycloak client is confidential: standard flow on, direct access grants off, and a redirect URI
 of `https://<argocd route host>/auth/callback`. Request the `groups` scope so group names arrive in
 the token's `groups` claim, which is what `rbac.scopes: '[groups]'` reads. The client secret value
-never comes from values: create a key in the instance namespace's `argocd-secret` (named
-`oidc.clientSecret` unless `clientSecretKey` says otherwise), or use the operator's documented
-secret mechanism.
+never comes from values. The simplest home is a Secret of its own in the instance namespace,
+labeled `app.kubernetes.io/part-of: argocd` so that Argo CD may read it, with
+`clientSecretRef: '<secret>:<key>'`. The operator owns `argocd-secret`, so a key added there by hand
+is not part of what it manages. Create the Secret without putting the value on a command line:
+
+```bash
+printf '%s' "$CLIENT_SECRET" | oc create secret generic argocd-oidc -n openshift-gitops \
+  --from-file=clientSecret=/dev/stdin
+oc label secret argocd-oidc -n openshift-gitops app.kubernetes.io/part-of=argocd
+```
+
+Keycloak rejects a scope it does not know, so the realm needs a `groups` client scope (with a group
+membership mapper, full group path off) assigned to the client.
 
 One risk to respect: never set `config.gitops.infra.disableAdmin` until SSO sign-in is proven in a
 browser. The local admin account is the only way in when the issuer URL, the CA or the groups claim

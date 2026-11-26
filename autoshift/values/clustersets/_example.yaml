@@ -955,7 +955,7 @@ hubClusterSets:
       # =======================================================================
       # Optional. Without this block the policy applies the Red Hat 4.22 default shown in
       # workerConfig below, which is what the NVIDIA GPU Operator needs for OpenShift AI and for
-      # OpenShift Virtualization GPU passthrough: PCI devices labelled by vendor, so a node with an
+      # OpenShift Virtualization GPU passthrough: PCI devices labeled by vendor, so a node with an
       # NVIDIA card gets feature.node.kubernetes.io/pci-10de.present=true.
       #
       # workerConfig is nfd-worker.conf and replaces the default outright, so copy the default
@@ -1999,12 +1999,14 @@ hubClusterSets:
         # authentication, which have no OAuth server for Dex's OpenShift connector, and on which the
         # GitOps operator no longer deploys Dex. spec.sso and spec.oidcConfig are mutually exclusive,
         # so mode 'oidc' drops the Dex stanza and writes spec.oidcConfig instead. The client secret
-        # never lives here: create a key in the instance namespace's argocd-secret, named
-        # oidc.clientSecret unless clientSecretKey says otherwise.
+        # never lives here: clientSecretRef names where Argo CD reads it, a key in argocd-secret
+        # (default oidc.clientSecret) or <secret>:<key> in a Secret labeled
+        # app.kubernetes.io/part-of: argocd in the instance namespace.
         sso:
           mode: 'oidc'
           issuer: 'https://keycloak.example.com/realms/example'
           clientID: 'argocd'
+          clientSecretRef: 'argocd-oidc:clientSecret'
           # The CA that signed the issuer's certificate, as PEM, when it is not publicly trusted.
           rootCA: |
             -----BEGIN CERTIFICATE-----

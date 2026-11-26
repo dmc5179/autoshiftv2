@@ -294,13 +294,14 @@ spec:
                   {{ "{{hub-" }} if eq $ssoMode "oidc" {{ "hub}}" }}
                   # Sign-in through the OIDC provider instead of Dex. spec.sso and spec.oidcConfig
                   # are mutually exclusive, so the Dex stanza is left out entirely. The client
-                  # secret never comes from values: it is a key in this instance namespace's
-                  # argocd-secret, named by the $oidc.<key> reference below.
+                  # secret never comes from values: clientSecret is an Argo CD secret reference,
+                  # a key in argocd-secret or <secret>:<key> in a Secret labeled
+                  # app.kubernetes.io/part-of: argocd in this instance namespace.
                   oidcConfig: |
                     name: {{ "{{hub" }} index $sso "name" | default "OIDC provider" {{ "hub}}" }}
                     issuer: {{ "{{hub" }} index $sso "issuer" {{ "hub}}" }}
                     clientID: {{ "{{hub" }} index $sso "clientID" {{ "hub}}" }}
-                    clientSecret: $oidc.{{ "{{hub" }} index $sso "clientSecretKey" | default "clientSecret" {{ "hub}}" }}
+                    clientSecret: ${{ "{{hub" }} index $sso "clientSecretRef" | default "oidc.clientSecret" {{ "hub}}" }}
                     {{ "{{hub-" }} if (index $sso "rootCA") {{ "hub}}" }}
                     rootCA: |
                       {{ "{{hub" }} (index $sso "rootCA") | autoindent {{ "hub}}" }}
