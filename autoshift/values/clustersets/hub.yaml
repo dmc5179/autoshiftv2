@@ -75,7 +75,16 @@ hubClusterSets:
       opencode:
         model: 'qwen3-8b'
       openWebui:
-        auth: 'openshift'
+        # Keycloak sign-in through Open WebUI's own OpenID Connect login (the cluster has no
+        # OpenShift OAuth server for the oauth-proxy that auth 'openshift' uses). Client
+        # open-webui in the realm; its secret is the Secret open-webui-oidc (key client-secret),
+        # created out of band.
+        auth: 'oidc'
+        issuerUrl: 'https://keycloak-keycloak-oidc-test.apps.rhoai.sandbox141.opentlc.com/realms/rhoai'
+        allowedGroups:
+          - 'maas-users'
+        adminGroups:
+          - 'cluster-admins'
         adminEmail: 'danclark@cluster.local'
         # A direct connection to the model next to Hermes. All Open WebUI users share
         # one key, so they share its owner's tokenRateLimit.

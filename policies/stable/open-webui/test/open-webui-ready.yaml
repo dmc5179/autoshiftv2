@@ -5,7 +5,7 @@
 # probe. With auth local and adminEmail set, the Secret is checked here too, because a missing
 # one is the most likely reason the pod is not running: the pod deliberately does not start
 # without it. With auth openshift there is no such Secret; the administrator signs in through
-# OpenShift.
+# OpenShift. With auth oidc the OAuth client secret is checked instead, for the same reason.
 object-templates-raw: |
   {{hub- $raw := (fromConfigMap .PolicyMetadata.namespace (printf "%s.rendered-config" .ManagedClusterName) "config" | default "") hub}}
   {{hub- $cfg := ($raw | fromYaml | default dict) hub}}
@@ -22,12 +22,21 @@ object-templates-raw: |
         namespace: '{{hub $ns hub}}'
       status:
         availableReplicas: 1
-  {{hub- if and (dig "adminEmail" "" $o) (ne (dig "auth" "local" $o) "openshift") hub}}
+  {{hub- if and (dig "adminEmail" "" $o) (eq (dig "auth" "local" $o) "local") hub}}
   - complianceType: musthave
     objectDefinition:
       apiVersion: v1
       kind: Secret
       metadata:
         name: '{{hub (dig "adminSecretRef" "name" "open-webui-admin" $o) hub}}'
+        namespace: '{{hub $ns hub}}'
+  {{hub- end hub}}
+  {{hub- if eq (dig "auth" "local" $o) "oidc" hub}}
+  - complianceType: musthave
+    objectDefinition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: '{{hub (dig "clientSecretRef" "name" "open-webui-oidc" $o) hub}}'
         namespace: '{{hub $ns hub}}'
   {{hub- end hub}}

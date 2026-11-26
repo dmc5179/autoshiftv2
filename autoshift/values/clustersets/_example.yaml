@@ -453,16 +453,30 @@ hubClusterSets:
         storageClass: 'gp3-csi'                  # example; omit for the cluster default
         # Optional public hostname. Default: <namespace>.<cluster ingress domain>.
         routeHost: 'chat.apps.example.com'
-        # Sign-in: 'local' (default; Open WebUI accounts) or 'openshift' (OpenShift credentials
-        # through an oauth-proxy sidecar; only members of allowedGroups get in).
-        auth: 'openshift'
-        allowedGroups:                           # openshift only; default [maas-users]
+        # Sign-in: 'local' (default; Open WebUI accounts), 'openshift' (OpenShift credentials
+        # through an oauth-proxy sidecar; needs the OpenShift OAuth server) or 'oidc' (an
+        # external OpenID Connect provider such as Keycloak, through Open WebUI's own OAuth
+        # login). With openshift or oidc only members of allowedGroups get in.
+        auth: 'oidc'
+        allowedGroups:                           # openshift and oidc; default [maas-users]
           - 'maas-users'
-        # proxyImage: ''                         # default: ImageStream openshift/oauth-proxy
+        # proxyImage: ''                         # openshift only; default: ImageStream openshift/oauth-proxy
+        # oidc only. The provider's client must be confidential, with redirect URI
+        # https://<route host>/oauth/oidc/callback and a groups claim in the ID token.
+        issuerUrl: 'https://keycloak.apps.example.com/realms/example'   # required for oidc
+        clientId: 'open-webui'                   # default open-webui
+        clientSecretRef:                         # a Secret an administrator creates
+          name: 'open-webui-oidc'                # default open-webui-oidc
+          key: 'client-secret'                   # default client-secret
+        providerName: 'Keycloak'                 # login button label; default Keycloak
+        scopes: 'openid email profile'           # default openid email profile
+        adminGroups:                             # required for oidc; these users are administrators
+          - 'cluster-admins'
         # Optional, strongly recommended. Open WebUI makes the first account to sign up the
         # administrator; adminEmail names it instead, created at first start.
         #   openshift: the proxy's address for an OpenShift user, <username>@cluster.local for
         #              a user without an email address. No password Secret is needed.
+        #   oidc:      the user's email at the provider. No password Secret is needed.
         #   local:     any address, with the password in a Secret an administrator creates in
         #              the namespace (adminSecretRef) before the site is reachable.
         adminEmail: 'admin@cluster.local'

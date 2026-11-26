@@ -46,12 +46,13 @@ policies:
       - path: test/open-webui-ready.yaml
         customMessage:
           noncompliant: >
-            ❌ Open WebUI is not Available, or the administrator password Secret
-            named by config.openWebui.adminSecretRef does not exist. With
-            adminEmail set the pod does not start without that Secret, which is
-            deliberate: the site is never reachable before its administrator
-            exists. Create it in the open-webui namespace with the password under
-            the configured key.
+            ❌ Open WebUI is not Available, or a Secret it needs does not exist.
+            With auth local and adminEmail set, that is the administrator password
+            Secret named by config.openWebui.adminSecretRef; the pod does not start
+            without it, which is deliberate: the site is never reachable before its
+            administrator exists. With auth oidc, it is the OAuth client secret
+            named by config.openWebui.clientSecretRef. Create the Secret in the
+            open-webui namespace with the value under the configured key.
   # inform: can Open WebUI's ServiceAccount mint a key for config.openWebui.maas.model? Without the
   # key Open WebUI still starts, with Hermes only, so this names the cause.
   - name: policy-open-webui-maas-access

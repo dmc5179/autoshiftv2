@@ -30,9 +30,15 @@ config:
 | `storageSize` | `10Gi` | Users, chats, uploads, the vector store and the seeded models |
 | `storageClass` | cluster default | Set only to override the default StorageClass |
 | `routeHost` | `<namespace>.<cluster ingress domain>` | Public hostname |
-| `auth` | `local` | `local`: Open WebUI accounts. `openshift`: OpenShift credentials. See [Sign-in](#sign-in) |
-| `allowedGroups` | `[maas-users]` | `openshift` only. OpenShift groups whose members can sign in |
+| `auth` | `local` | `local`: Open WebUI accounts. `openshift`: OpenShift credentials. `oidc`: an external OpenID Connect provider such as Keycloak. See [Sign-in](#sign-in) |
+| `allowedGroups` | `[maas-users]` | `openshift` and `oidc`. Groups whose members can sign in |
 | `proxyImage` | from ImageStream `openshift/oauth-proxy` | `openshift` only. Override for the proxy image |
+| `issuerUrl` | | `oidc` only, required. The provider's issuer, for example `https://keycloak.apps.example.com/realms/example` |
+| `clientId` | `open-webui` | `oidc` only. The OAuth client at the provider |
+| `clientSecretRef.name` / `.key` | `open-webui-oidc` / `client-secret` | `oidc` only. Secret holding the client secret, created by an administrator |
+| `providerName` | `Keycloak` | `oidc` only. The label on the sign-in button |
+| `scopes` | `openid email profile` | `oidc` only |
+| `adminGroups` | | `oidc` only, required. Groups whose members are administrators |
 | `adminEmail` | | Strongly recommended. See [Administrator](#administrator) |
 | `adminSecretRef.name` / `.key` | `open-webui-admin` / `password` | `local` only. Secret holding the administrator password |
 | `maas.model` | | Optional. A model name in `config.openshiftAiModels.models`, offered directly next to Hermes. See [Models-as-a-Service connection](#models-as-a-service-connection) |
@@ -75,6 +81,93 @@ provider's Secret, sign-in can briefly fail at `/oauth/authorize` with `server_e
 `resource name may not be empty`. That comes from the OAuth server, not from this policy, and
 clears within a couple of minutes.
 
+### `auth: oidc`
+
+Users sign in with an external OpenID Connect provider, such as Keycloak, through Open WebUI's own
+OAuth login. There is no proxy: Open WebUI listens on all interfaces, the Route terminates TLS at
+the router and sends traffic straight to it, and no trusted headers are set. Use this mode on a
+cluster that authenticates directly against an external provider and so has no OpenShift OAuth
+server, where `openshift` cannot work.
+
+How it works:
+
+- The login page offers only a **Continue with** button for `providerName`. The password form and
+  password sign-up are off.
+- Open WebUI fetches the provider's discovery document from
+  `<issuerUrl>/.well-known/openid-configuration` and uses the authorization code flow with PKCE
+  (S256) and the client secret.
+- At every sign-in, Open WebUI's role management reads the `groups` claim. A member of
+  `adminGroups` becomes an administrator, a member of `allowedGroups` a user, and anyone whose
+  groups match neither is refused. A role changed in **Admin Panel > Users** therefore lasts only
+  until that user next signs in; change group membership at the provider instead.
+- A user whose token carries no `groups` claim at all is not checked by role management, so the
+  default role for new users is `pending`: such a user waits for an administrator.
+- A first sign-in creates the account, or links it to an existing account with the same email
+  address (`OAUTH_MERGE_ACCOUNTS_BY_EMAIL`). That is how the account `adminEmail` created, or an
+  account from an earlier sign-in mode, keeps its chats.
+- The provider's certificate is verified against the system CAs plus the cluster's default ingress
+  CA, so a provider on a Route of the same cluster works without further configuration.
+- The settings above must apply on an install whose database already holds other values, so this
+  mode sets `ENABLE_PERSISTENT_CONFIG=False`, as `maas.model` does. See
+  [Settings come from the policy](#settings-come-from-the-policy-not-the-admin-panel).
+
+#### Keycloak client
+
+The hub values to set:
+
+```yaml
+config:
+  openWebui:
+    auth: 'oidc'
+    issuerUrl: 'https://keycloak.apps.example.com/realms/example'
+    adminGroups:
+      - 'rhoai-admins'
+    allowedGroups:
+      - 'maas-users'
+```
+
+Create the client at the provider as a confidential client, with:
+
+| Setting | Value |
+|---------|-------|
+| Client ID | `clientId`, default `open-webui` |
+| Client authentication | On (confidential), with a client secret |
+| Standard flow (authorization code) | On. Other flows are not needed |
+| Valid redirect URI | `https://<route host>/oauth/oidc/callback` |
+| Web origin | `https://<route host>` |
+| Scopes | `openid`, `email` and `profile`, or `scopes` |
+| `groups` claim | The user's group names, without a leading `/`, in the ID token and from the `userinfo` endpoint. In Keycloak, a **Group Membership** mapper with **Full group path** off |
+| `email` claim | Required. Open WebUI refuses a sign-in without one |
+
+Role management reads the `groups` claim at every sign-in, so the mapper above is what makes
+`adminGroups` and `allowedGroups` work.
+
+Store the client secret in the Secret named by `clientSecretRef` (default name
+`open-webui-oidc`, key `client-secret`), out of band with `--from-file`, so the value never
+appears on a command line:
+
+```bash
+oc create secret generic open-webui-oidc -n open-webui --from-file=client-secret=<file>
+```
+
+The pod does not start until that Secret exists, and `policy-open-webui-ready` names it.
+
+#### Moving an existing install to `oidc`
+
+Accounts are matched by email address. An account created by `auth: openshift` has the proxy's
+address, `<username>@cluster.local` for a user without an email address, which is usually not the
+address the provider sends. Before switching, change each account's email in
+**Admin Panel > Users** to the user's email at the provider. Otherwise the first sign-in creates a
+new, empty account, and the old account with its chats stays behind. Users, chats and uploads stay
+on the PVC either way.
+
+Objects that only `auth: openshift` uses, the `open-webui-proxy` ServiceAccount, Service, Role,
+RoleBinding and serving certificate Secret, are left in place, because the policy never deletes
+anything. Delete them by hand if wanted. With `maas.model` set, the pod now runs as the
+`open-webui` ServiceAccount. It reuses the stored MaaS key, which `open-webui-proxy` minted, until
+that key renews; revoking the old key at that renewal might then be refused, and the old key lapses
+at the end of its TTL instead.
+
 ### `auth: local`
 
 Open WebUI's own accounts, with sign-up and passwords.
@@ -89,6 +182,11 @@ safe to leave in place.
 `<username>@cluster.local` for a user without an email address. That user signs in through
 OpenShift as the administrator. No password Secret is involved: the account gets a random password
 at creation, which nothing can use because sign-in always goes through the proxy.
+
+**With `auth: oidc`**, set `adminEmail` to that user's email address at the provider. The first
+sign-in links to the account by email, as described above. The account gets a random password, as
+with `auth: openshift`. The user must also be in `adminGroups`, or role management makes the account
+a user, or refuses it, at the first sign-in.
 
 **With `auth: local`**, the password comes from a Secret that an administrator creates in the
 namespace, out of band:
@@ -114,8 +212,8 @@ the namespace deletes every user, chat and upload.
 
 | Policy | Mode | Does |
 |--------|------|------|
-| `policy-open-webui` | enforce | Namespace, the copied Hermes key, PVC, Deployment, Service and Route; with `auth: openshift`, also the proxy ServiceAccount and the sign-in Role and RoleBinding |
-| `policy-open-webui-ready` | inform | The Deployment is Available, and with `auth: local` and `adminEmail` set, the administrator Secret exists |
+| `policy-open-webui` | enforce | Namespace, the copied Hermes key, PVC, Deployment, Service and Route; with `auth: openshift`, also the proxy ServiceAccount and the sign-in Role and RoleBinding; with `auth: oidc` or `maas.model`, also the ingress CA ConfigMap |
+| `policy-open-webui-ready` | inform | The Deployment is Available; with `auth: local` and `adminEmail` set, the administrator Secret exists; with `auth: oidc`, the client secret Secret exists |
 | `policy-open-webui-maas-access` | inform | With `maas.model` set: the model's `accessGroups` let this namespace's ServiceAccounts mint a key, and its subscription exists |
 | `policy-open-webui-maas-key` | inform | With `maas.model` set: the MaaS key exists, has not expired, and is not more than two hours overdue for renewal |
 
@@ -179,8 +277,8 @@ How the key works, as for Hermes:
 ### Settings come from the policy, not the Admin Panel
 
 A renewed key must reach Open WebUI at every start, but Open WebUI normally reads connection
-settings from the environment on first start only. With `maas.model` set, the policy therefore
-sets `ENABLE_PERSISTENT_CONFIG=False`, and Open WebUI takes every setting from the environment at
+settings from the environment on first start only. With `maas.model` set, or with `auth: oidc`,
+the policy therefore sets `ENABLE_PERSISTENT_CONFIG=False`, and Open WebUI takes every setting from the environment at
 every start. The cost: a setting changed in the Admin Panel lasts only until the pod next restarts,
 which includes each key renewal. Users, chats, uploads and per-model settings are stored data, not
 settings, and are kept.
