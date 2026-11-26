@@ -93,15 +93,30 @@ hubClusterSets:
           path: '/v1'
           secretName: 'maas-api-key'
         model: 'publishers/llm/models/qwen3-8b'
-        # Offline Red Hat docs, DIRECT to the knowledge bridge. The shared MCP gateway
-        # (config.mcpGateway) is live since 2026-11-25, but it does not list this server's
-        # tools yet (its broker negotiates MCP 2026-07-28 with the bridge and then lists
-        # nothing), so Lightspeed stays direct. The bridge has no auth, so no headers; its
+        # Offline Red Hat docs, through the shared MCP gateway (config.mcpGateway):
+        # https://mcp.<apps domain>, path /mcp by default. The gateway's broker used to
+        # negotiate MCP 2026-07-28 with the bridge and then list nothing; since the
+        # gateway's rhokp-docs entry gained supportedProtocolVersions (fork f14f6c00) it
+        # lists the bridge's tools, to 2025 clients only. The Authorization header
+        # forwards the signed-in user's token, which the gateway's kubernetes TokenReview
+        # auth accepts; the bridge itself has no auth. The gateway also federates the
+        # openshift_* tools, which duplicate the built-in openshift MCP server Lightspeed
+        # always has — harmless overlap, and one entry buys both. The bridge's
         # NetworkPolicy admits openshift-lightspeed, openshift-ingress and mcp-gateway.
         mcpServers:
-          - name: 'redhat-docs'
-            url: 'http://rhokp-mcp.rhokp.svc.cluster.local:8000/mcp'
+          - name: 'mcp-gateway'
+            ingressHost: 'mcp'            # https://mcp.<apps domain>/mcp
             timeout: 60
+            headers:
+              - name: 'Authorization'
+                valueFrom:
+                  type: 'kubernetes'      # the signed-in user's token
+        # Fallback, pre-gateway: direct to the knowledge bridge. No headers; the bridge
+        # has no auth. musthave never removes list entries, so switch back by hand:
+        # remove the mcp-gateway entry from the OLSConfig first (see the policy README).
+        # - name: 'redhat-docs'
+        #   url: 'http://rhokp-mcp.rhokp.svc.cluster.local:8000/mcp'
+        #   timeout: 60
         # The CRD default, written down so git describes the cluster.
         toolBudgetRatio: 0.5
         # Tool-result inspection off: it is judged by the same small Granite model, and
@@ -484,6 +499,13 @@ hubClusterSets:
           - name: cluster-admins
             clusterRoles:
               - cluster-admin
+          # Traces from the TempoStack `agents` (tenant agents, agent-identity-manual
+          # 07-tempo.yaml): its ClusterRole tempo-agents-traces-reader grants read on the
+          # tenant's traces. Membership is granted in the Keycloak realm; the token's
+          # groups claim carries the name this policy binds.
+          - name: tracing-viewers
+            clusterRoles:
+              - tempo-agents-traces-reader
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
