@@ -64,27 +64,10 @@ hubClusterSets:
                   maxAllowed:
                     memory: '512Mi'
                   controlledValues: 'RequestsAndLimits'
-      # Dev Spaces signs in through Keycloak (the cluster uses external OIDC since 2026-11-24). From the
-      # Dev Spaces 3.28+ install guide, "Use an external identity provider for authentication". Created
-      # by hand, not here: Keycloak client "devspaces" (redirect <cheURL>/oauth/callback), Secret
-      # openshift-devspaces/oauth-secret (key oAuthSecret), ConfigMap openshift-devspaces/keycloak-certs
-      # (ingress CA, labelled ca-bundle), and "devspaces" in the Authentication audiences.
-      dev-spaces:
-        checluster:
-          networking:
-            auth:
-              oAuthClientName: 'devspaces'
-              oAuthSecret: 'oauth-secret'
-              identityProviderURL: 'https://keycloak-keycloak-oidc-test.apps.rhoai.sandbox141.opentlc.com/realms/rhoai'
-              gateway:
-                oAuthProxy:
-                  cookieExpireSeconds: 300
-                deployment:
-                  containers:
-                    - name: 'oauth-proxy'
-                      env:
-                        - name: 'OAUTH2_PROXY_CODE_CHALLENGE_METHOD'
-                          value: 'S256'
+      # Dev Spaces sign-in moved to the per-cluster values: AUTH_MODE=oidc scripts/45-autoshift-values.sh
+      # writes config.dev-spaces.checluster.networking.auth. The hand-made Keycloak client
+      # "devspaces", the openshift-devspaces/oauth-secret Secret, the keycloak-certs ConfigMap
+      # and the Authentication audiences stay as they are.
       hermesAgent:
         model: 'qwen3-8b'
       # OpenCode sample on the Dev Spaces dashboard. The MaaS host is read from the
@@ -486,6 +469,21 @@ hubClusterSets:
               - ojoseph
               - grenner
               - vreynold
+      # group-rbac: the bindings htpasswd-users used to create, for a cluster whose users
+      # sign in through Keycloak. The token's groups claim carries the names; this policy
+      # binds them. Mirrors config.htpasswdUsers.groups above without the user lists.
+      # rhods-admins is deliberately absent: that group carries no roles (the dashboard's
+      # adminGroups grant rides on the groups claim), and the policy fails on a group with
+      # neither clusterRoles nor namespaceRoles.
+      group-rbac:
+        groups:
+          - name: maas-users
+            namespaceRoles:
+              - namespace: llm
+                role: view
+          - name: cluster-admins
+            clusterRoles:
+              - cluster-admin
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
@@ -655,6 +653,9 @@ hubClusterSets:
       # config.htpasswdUsers above.
       # Off since 2026-11-24: the cluster uses external OIDC (Keycloak); the user/group APIs are gone.
       htpasswd-users: 'false'
+      # Replaces htpasswd-users' bindings on this OIDC cluster: it binds the names in the
+      # identity provider's groups claim, from config.group-rbac above.
+      group-rbac: 'true'
       ### OpenShift Gitops
       gitops: 'true' # is expected to be installed on all hub clusters
       gitops-subscription-name: openshift-gitops-operator
