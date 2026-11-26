@@ -111,7 +111,22 @@ How it works:
   mode sets `ENABLE_PERSISTENT_CONFIG=False`, as `maas.model` does. See
   [Settings come from the policy](#settings-come-from-the-policy-not-the-admin-panel).
 
-The client, created at the provider by an administrator:
+#### Keycloak client
+
+The hub values to set:
+
+```yaml
+config:
+  openWebui:
+    auth: 'oidc'
+    issuerUrl: 'https://keycloak.apps.example.com/realms/example'
+    adminGroups:
+      - 'rhoai-admins'
+    allowedGroups:
+      - 'maas-users'
+```
+
+Create the client at the provider as a confidential client, with:
 
 | Setting | Value |
 |---------|-------|
@@ -124,7 +139,12 @@ The client, created at the provider by an administrator:
 | `groups` claim | The user's group names, without a leading `/`, in the ID token and from the `userinfo` endpoint. In Keycloak, a **Group Membership** mapper with **Full group path** off |
 | `email` claim | Required. Open WebUI refuses a sign-in without one |
 
-Then store the client secret in the namespace, out of band:
+Role management reads the `groups` claim at every sign-in, so the mapper above is what makes
+`adminGroups` and `allowedGroups` work.
+
+Store the client secret in the Secret named by `clientSecretRef` (default name
+`open-webui-oidc`, key `client-secret`), out of band with `--from-file`, so the value never
+appears on a command line:
 
 ```bash
 oc create secret generic open-webui-oidc -n open-webui --from-file=client-secret=<file>
