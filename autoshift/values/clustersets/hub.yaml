@@ -432,6 +432,59 @@ hubClusterSets:
       # come from the gitops-dev-team-<team> labels below; this block supplies
       # each team's ArgoCD RBAC + resource sizing (all fields optional).
       gitops:
+        # Argo CD signs in through the realm (client argocd, confidential; the groups client
+        # scope carries the groups claim that rbac.scopes reads). This cluster has no OAuth
+        # server, so the Dex stanza could not work here. The secret is in the Secret
+        # openshift-gitops/argocd-oidc-keycloak (labeled app.kubernetes.io/part-of: argocd);
+        # the CA is the cluster ingress CA (openshift-config-managed/default-ingress-cert),
+        # which signs the Keycloak route. Admin stays enabled as the fallback.
+        sso:
+          mode: 'oidc'
+          name: 'Keycloak'
+          issuer: 'https://keycloak-keycloak-oidc-test.apps.rhoai.sandbox141.opentlc.com/realms/rhoai'
+          clientID: 'argocd'
+          clientSecretRef: 'argocd-oidc-keycloak:clientSecret'
+          rootCA: |
+            -----BEGIN CERTIFICATE-----
+            MIIDfTCCAmWgAwIBAgIIMI+y88a9ix8wDQYJKoZIhvcNAQELBQAwJjEkMCIGA1UE
+            AwwbaW5ncmVzcy1vcGVyYXRvckAxNzk0MTgzNDMxMB4XDTI2MTEwOTAwMTcxMVoX
+            DTI4MTEwODAwMTcxMlowLjEsMCoGA1UEAwwjKi5hcHBzLnJob2FpLnNhbmRib3gx
+            NDEub3BlbnRsYy5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC2
+            3r1/GnmK6r4qYbfGyjGT/DUXLEiqLDQipp9GQ+KOSSN10JcpRR2fA/1iOriE0At1
+            kpCb8/U7rTkI2zoxgutZjfzNMVR400HcnW6lFCAJj0TpXmaYY6Q1i0PP5MYRDiD8
+            zhyD5W4Frz7FV8SyeOpVtgKeXewkcPNOWw3TDCzpsWRjl5YPvtJoOFAtHIgUAvHJ
+            F/nnTYblGGM312BA10M+xdoDFQioFSfteIa6iNLWUbV6TSyozEzUBHr914giDt6T
+            LsE0zz+cMiHKLkuit8tTZ8VHc5lbQBOizmNbPV2Zf8bTRTE4n8WFmikoMlkNtKiy
+            AZikJTkGZXTPeSUJdg6RAgMBAAGjgaYwgaMwDgYDVR0PAQH/BAQDAgWgMBMGA1Ud
+            JQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYEFHTnuT9UfDsC
+            GXq+yA/JiSxIACkNMB8GA1UdIwQYMBaAFDqPIuhWGutfPhqgqFGJowCTA2JYMC4G
+            A1UdEQQnMCWCIyouYXBwcy5yaG9haS5zYW5kYm94MTQxLm9wZW50bGMuY29tMA0G
+            CSqGSIb3DQEBCwUAA4IBAQC++dSSd36sOhTz/xHscY3QSV0YA5Wc3O5Pr/gihXmD
+            pZhI8ICJ/UomP4CbWlZmQd0GsFI7EWuWn6zu0HqyQZyL7dNt+3ko1lzrXX6Z6OfC
+            Q0lJrpr0oFoS/euX95xOxT582dfS/L7GgGrOLOtMQxKpqBmLKFqRfKB1ASPdVmMZ
+            56STLfug7hoj2HyBX27fDcfxs6bvdd2qdr1xEGudLIiTdqayb2I76PLcdEI3Nokx
+            SdZI18l3y0cyXfRnAAckVolSPMbngUVXmiwe7W0PFHe4SBcuQl8xF1jR/emr2bAY
+            ZL8RrTS5iLEsLpuMYYpJ4TMiqXo+pKkU5MaR7k6IYMgY
+            -----END CERTIFICATE-----
+            -----BEGIN CERTIFICATE-----
+            MIIDDDCCAfSgAwIBAgIBATANBgkqhkiG9w0BAQsFADAmMSQwIgYDVQQDDBtpbmdy
+            ZXNzLW9wZXJhdG9yQDE3OTQxODM0MzEwHhcNMjYxMTA5MDAxNzEwWhcNMjgxMTA4
+            MDAxNzExWjAmMSQwIgYDVQQDDBtpbmdyZXNzLW9wZXJhdG9yQDE3OTQxODM0MzEw
+            ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDRMjZ/5mVR2ho96zLCH03m
+            zjvEIo+0AG+S4rn9hMyW8iFXecGSq81n1XVCbp/ePcRJDxCQoWThLu7TtT5mhors
+            jwmFyrK/JjyNS8hLrCnpe4DvWS8q7vIwKW9vgkmWm21lmvPRDuTBcGY593m0jdTe
+            0xxSzPRYYHwUTab5qDKY1we3XgPVvK3Iannlk1Ca9fXnQitBqkEsRWO8rIF6mEDZ
+            Uhxbyk5j5kZgs8c/7B4QYcmZq5/VmurRP/tt8TWF3iwW3L1TvfdpnrStiGwASAvh
+            P0FBdUxkMkLouvlt+UqHFCBiPMRPZydUm5bCKidw8t24YAtFkiqHuw7tBXFBE6vn
+            AgMBAAGjRTBDMA4GA1UdDwEB/wQEAwICpDASBgNVHRMBAf8ECDAGAQH/AgEAMB0G
+            A1UdDgQWBBQ6jyLoVhrrXz4aoKhRiaMAkwNiWDANBgkqhkiG9w0BAQsFAAOCAQEA
+            NPXi6CkHB0ycimRUTuxMZEFjCW2FpR8jwh0yILWXVanwM1BB+aWh0z863crGh95t
+            xLzW31Y3md+okOX/v5qR4MVHjuVzmPmkoqVmS1DP6DAGRw7grAJHin1+hoESOJsn
+            JaEBZPT7KAzH912WPfMQ4L69aoBR6V6uNWXVkrkc9mJl1iFVJBPzPlSLHe35pjK9
+            f0R7SXwb2Bn/b38XYy3EkzSgbh84KFE+mGhB2udcucsFxc8fgi2aVO8RJ32vOm+V
+            Mvt99M8ttRTBFsauDWPlPafJmcM7D3pV6n0l2JiUMoaQMe6yx0HkMOT45utneCTp
+            vTfo8+FH5fWI2mhk7Zs8qw==
+            -----END CERTIFICATE-----
         teams:
           dev:
             gitops_rbac_policies:
