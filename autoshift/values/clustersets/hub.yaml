@@ -110,11 +110,11 @@ hubClusterSets:
           path: '/v1'
           secretName: 'maas-api-key'
         model: 'publishers/llm/models/qwen3-8b'
-        # Offline Red Hat docs, DIRECT to the knowledge bridge for now: the shared MCP
-        # gateway is blocked (its controller crash-loops at its shipped limits). The
-        # bridge has no auth, so no headers; its NetworkPolicy admits only
-        # openshift-lightspeed (and the gateway later). Move to the gateway
-        # (ingressHost: mcp, the user's token) once it works.
+        # Offline Red Hat docs, DIRECT to the knowledge bridge. The shared MCP gateway
+        # (config.mcpGateway) is live since 2026-11-25, but it does not list this server's
+        # tools yet (its broker negotiates MCP 2026-07-28 with the bridge and then lists
+        # nothing), so Lightspeed stays direct. The bridge has no auth, so no headers; its
+        # NetworkPolicy admits openshift-lightspeed, openshift-ingress and mcp-gateway.
         mcpServers:
           - name: 'redhat-docs'
             url: 'http://rhokp-mcp.rhokp.svc.cluster.local:8000/mcp'

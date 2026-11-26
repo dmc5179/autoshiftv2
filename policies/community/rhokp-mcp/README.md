@@ -98,8 +98,11 @@ Each of these would otherwise report success while broken:
   holds documents. `policy-rhokp-server-ready` therefore means search returns results.
 - **The MCP server with Solr unreachable** starts and answers every query with nothing. It is
   deployed only after `policy-rhokp-server-ready`.
-- **An MCP pod that is Ready** has not necessarily listed tools for anyone. The MCP gateway's
-  `MCPServerRegistration` Ready condition, in `policy-mcp-gateway-ready`, is the end-to-end check.
+- **An MCP pod that is Ready** has not necessarily listed tools for anyone, and neither has a
+  Ready `MCPServerRegistration`. On Connectivity Link 1.5.0 the registration for this server was
+  Ready while the gateway's `tools/list` showed none of its tools, and a `tools/call` returned
+  "Tool not found": the broker negotiated MCP protocol `2026-07-28` with this server and listed
+  nothing. Check `tools/list` through the gateway for the `<prefix>` tools.
 
 Both Deployments use `mustonlyhave`, because `musthave` merges into `containers[]` and would never
 apply an image or setting change.
