@@ -34,6 +34,11 @@ policies:
   - name: policy-group-rbac
     manifests:
       - path: manifests/bindings
+    # A fail's message arrives buried in the template-error dump; strip the dump. consolidateManifests
+    # must be false on a policy whose manifest carries a customMessage.
+    consolidateManifests: false
+    customMessage:
+      noncompliant: '{{ regexReplaceAll "(?s).*error calling fail: " .DefaultMessage "" | trim }}'
   # Separate inform policy: a root remediationAction overrides its children, so an assertion
   # cannot be bundled inside an enforcing policy.
   - name: policy-group-rbac-ready
