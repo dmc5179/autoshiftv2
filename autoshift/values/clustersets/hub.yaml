@@ -567,13 +567,14 @@ hubClusterSets:
           - name: cluster-admins
             clusterRoles:
               - cluster-admin
-          # Traces from the TempoStack `agents` (tenant agents, agent-identity-manual
-          # 07-tempo.yaml): its ClusterRole tempo-agents-traces-reader grants read on the
-          # tenant's traces. Membership is granted in the Keycloak realm; the token's
-          # groups claim carries the name this policy binds.
+          # Traces in OpenShift AI's Tempo (data-science-tempomonolithic, tenant
+          # redhat-ods-monitoring; agent-identity-manual 07-observability.yaml): its
+          # ClusterRole tempo-ods-traces-reader grants read on the tenant's traces.
+          # Membership is granted in the Keycloak realm; the token's groups claim
+          # carries the name this policy binds.
           - name: tracing-viewers
             clusterRoles:
-              - tempo-agents-traces-reader
+              - tempo-ods-traces-reader
       # ===================================================================
       # Workloads deployed from their OWN repositories, as ArgoCD
       # Applications. DATA; the ENABLE flag is the gitops-workloads label.
