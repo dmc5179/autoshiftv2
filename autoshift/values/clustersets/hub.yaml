@@ -219,9 +219,9 @@ hubClusterSets:
             minReplicas: 3
             maxReplicas: 6
           gpu:
-            # 1 = GPU on (back 2026-11-27). To park it: minReplicas 0 here and qwen3-8b replicas 0
-            # below, then bootstrap. Bringing it back takes ~15-20 min to serve.
-            minReplicas: 1
+            # 0 = GPU parked (2026-11-28): no GPU node while qwen3-8b has replicas 0. To bring it back,
+            # set minReplicas 1 here and qwen3-8b replicas 1 below, then bootstrap (~15-20 min to serve).
+            minReplicas: 0
             maxReplicas: 2
       openshiftAiModels:
         namespace: 'llm'
@@ -280,7 +280,7 @@ hubClusterSets:
             # presents as ImagePullBackOff on the runtime container while the
             # modelcar pulls fine, so it looks like a model problem.
             image: 'registry.redhat.io/rhaii/vllm-cuda-rhel9@sha256:fd9540f3882b9aae5f862eba6c295d0e9c6b43f8c17b27b179481bfa330bfbc1'
-            replicas: 1          # 0 parks it with the GPU node (clusterAutoscaler.machineSets.gpu)
+            replicas: 0          # parked with the GPU node (clusterAutoscaler.machineSets.gpu); 1 to bring back
             gpus: 1
             requestsCpu: '2'
             requestsMemory: '8Gi'
